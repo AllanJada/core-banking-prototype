@@ -7,11 +7,6 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
-/**
- * Demo-only convenience: seeds a fixed set of users on startup so there's no registration
- * flow to build yet. Passwords are still bcrypt-hashed at rest, per the "not a priority,
- * but not reckless either" scope agreed for this demo.
- */
 @RequiredArgsConstructor
 @Component
 public class DemoDataSeeder implements CommandLineRunner {
