@@ -23,4 +23,9 @@ public class UserController {
         return ResponseEntity.status(HttpStatus.CREATED).body(createdUser);
     }
 
+    @GetMapping
+    ResponseEntity<List<UserResponse>> listUsers() {
+        return ResponseEntity.ok(userService.listUsers());
+    }
+
 }

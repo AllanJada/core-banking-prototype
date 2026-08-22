@@ -9,6 +9,9 @@ import org.learning.mldsa.repositories.UserRepositories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 @RequiredArgsConstructor
 @Service
 public class UserService {
@@ -27,6 +30,12 @@ public class UserService {
 
         return new UserResponse(savedUser.getUserId(), savedUser.getName());
 
+    }
+
+    public List<UserResponse> listUsers() {
+        return userRepositories.findAll().stream()
+                .map(u -> new UserResponse(u.getUserId(), u.getName()))
+                .collect(Collectors.toList());
     }
 
 }
