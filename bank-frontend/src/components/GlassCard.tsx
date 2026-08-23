@@ -9,9 +9,9 @@ export type GlassFrost = "none" | "light" | "heavy";
 // with how much that panel needs to stand out. "none" is a plain bordered
 // shell with no fill/blur at all, for wrapping other frosted panels.
 const FROST_CONFIG: Record<GlassFrost, { alpha: number; blur: number }> = {
-  none: { alpha: 0, blur: 0 },
-  light: { alpha: 0.16, blur: 32 },
-  heavy: { alpha: 0.26, blur: 64 },
+  none: { alpha: 0.14, blur: 0 },
+  light: { alpha: 0.04, blur: 6 },
+  heavy: { alpha: 0.08, blur: 12 },
 };
 
 interface GlassCardProps extends PaperProps {

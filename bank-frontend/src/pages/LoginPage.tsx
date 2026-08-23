@@ -15,7 +15,7 @@ import {
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { login as loginRequest } from "../api/client";
-import cardLogo from "../assets/cardLogo.jpeg";
+import cardLogo from "../assets/cardLogo.png";
 import { useAuth } from "../context/AuthContext";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
@@ -83,7 +83,7 @@ export default function LoginPage() {
       >
         {/* Branding panel — lightly frosted, stays closer to see-through */}
         <GlassCard
-          frost="light"
+          frost="none"
           elevation={0}
           sx={{
             flex: 1,
@@ -100,12 +100,24 @@ export default function LoginPage() {
             borderBottom: { xs: "1px solid rgba(255,255,255,0.14)", md: "none" },
           }}
         >
-          <Box
-            component="img"
-            src={cardLogo}
-            alt="Bank of Tanzania logo"
-            sx={{ width: { xs: 120, md: 150 }, height: "auto", display: "block" }}
-          />
+            <Box
+              sx={{
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                textAlign: "center",
+                flex: 1,
+              }}
+            >
+              <Box
+                component="img"
+                src={cardLogo}
+                alt="Bank of Tanzania logo"
+                sx={{ width: { xs: 120, md: 150 }, height: "auto", display: "block", mx: "auto" }}
+              />
+            </Box>
 
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff" }}>
