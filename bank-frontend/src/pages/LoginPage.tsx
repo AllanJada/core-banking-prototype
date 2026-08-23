@@ -12,10 +12,10 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { login as loginRequest } from "../api/client";
+import cardLogo from "../assets/cardLogo.jpeg";
 import { useAuth } from "../context/AuthContext";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
@@ -101,19 +101,11 @@ export default function LoginPage() {
           }}
         >
           <Box
-            sx={{
-              width: 56,
-              height: 56,
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "rgba(255,255,255,0.12)",
-              border: "1px solid rgba(255,255,255,0.2)",
-            }}
-          >
-            <ShieldOutlinedIcon sx={{ color: "#fff", fontSize: 28 }} />
-          </Box>
+            component="img"
+            src={cardLogo}
+            alt="Bank of Tanzania logo"
+            sx={{ width: { xs: 120, md: 150 }, height: "auto", display: "block" }}
+          />
 
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff" }}>
