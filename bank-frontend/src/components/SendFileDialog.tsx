@@ -13,6 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 import UploadIcon from "@mui/icons-material/UploadFileOutlined";
+import VisibilityIcon from "@mui/icons-material/VisibilityOutlined";
 import { listUsers, sendFile } from "../api/client";
 import type { User } from "../types";
 
@@ -21,6 +22,10 @@ interface SendFileDialogProps {
   onClose: () => void;
   onSent: () => void;
   currentUser: User;
+}
+
+function isPdf(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 export default function SendFileDialog({
@@ -34,6 +39,8 @@ export default function SendFileDialog({
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -41,11 +48,26 @@ export default function SendFileDialog({
     setReceiverId("");
     setFile(null);
     setError(null);
+    setShowPreview(false);
 
     listUsers()
       .then((users) => setRecipients(users.filter((u) => u.userId !== currentUser.userId)))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
   }, [open, currentUser.userId]);
+
+  // The selected file never leaves the browser at this point — the preview is
+  // rendered straight from the local File object via a blob URL, no upload
+  // or backend round-trip needed.
+  useEffect(() => {
+    if (!file || !isPdf(file)) {
+      setPreviewUrl(null);
+      setShowPreview(false);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   async function handleSend() {
     if (receiverId === "" || !file) {
@@ -66,7 +88,7 @@ export default function SendFileDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth={showPreview ? "sm" : "xs"}>
       <DialogTitle>Send a file</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
@@ -86,23 +108,50 @@ export default function SendFileDialog({
             ))}
           </TextField>
 
-          <Button
-            component="label"
-            variant="outlined"
-            startIcon={<UploadIcon />}
-            sx={{ justifyContent: "flex-start" }}
-          >
-            {file ? file.name : "Choose file"}
-            <input
-              type="file"
-              hidden
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              component="label"
+              variant="outlined"
+              startIcon={<UploadIcon />}
+              sx={{ justifyContent: "flex-start", flex: 1 }}
+            >
+              {file ? file.name : "Choose file"}
+              <input
+                type="file"
+                hidden
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </Button>
+            {previewUrl && (
+              <Button
+                variant="outlined"
+                startIcon={<VisibilityIcon />}
+                onClick={() => setShowPreview((v) => !v)}
+              >
+                {showPreview ? "Hide" : "Preview"}
+              </Button>
+            )}
+          </Stack>
+
           {file && (
             <Typography variant="caption" color="text.secondary">
               {(file.size / 1024).toFixed(1)} KB
             </Typography>
+          )}
+
+          {showPreview && previewUrl && (
+            <Box
+              component="iframe"
+              src={previewUrl}
+              title="PDF preview"
+              sx={{
+                width: "100%",
+                height: 420,
+                border: "1px solid",
+                borderColor: "divider",
+                borderRadius: 1,
+              }}
+            />
           )}
         </Stack>
       </DialogContent>
