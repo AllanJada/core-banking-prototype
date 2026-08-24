@@ -17,6 +17,12 @@ const HIGHLIGHTS: Highlight[] = [
   { icon: VisibilityOutlinedIcon, text: "Full visibility into every transfer's status" },
 ];
 
+// Same readability workaround as LoginPage: a dark halo behind text/icons,
+// independent of whatever frost level the parent panel is set to.
+const textShadowSx = {
+  textShadow: "0 1px 3px rgba(0,0,0,0.65), 0 1px 8px rgba(0,0,0,0.4)",
+};
+
 export default function SecurityHighlights() {
   return (
     <Stack spacing={2}>
@@ -31,12 +37,16 @@ export default function SecurityHighlights() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "rgba(255,255,255,0.12)",
+              // Solid dark backing (not glass — just a plain translucent-black
+              // circle) so the icon reads clearly regardless of the parent
+              // panel's frost setting.
+              background: "rgba(0,0,0,0.35)",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
             }}
           >
             <Icon sx={{ color: "#fff", fontSize: 18 }} />
           </Box>
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.85)" }}>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)", ...textShadowSx }}>
             {text}
           </Typography>
         </Stack>

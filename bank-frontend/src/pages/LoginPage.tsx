@@ -35,10 +35,19 @@ const glassInputSx = {
   "& .MuiInputLabel-root.Mui-focused": { color: "#1F9E89" },
 };
 
+// Readability workaround, independent of the glass panels themselves: a soft
+// dark halo behind light text so it stays legible over whatever happens to
+// be directly behind it in the photo (sky, glass, foliage all vary a lot).
+// Doesn't touch GlassCard's blur/opacity/frost config at all.
+const textShadowSx = {
+  textShadow: "0 1px 3px rgba(0,0,0,0.65), 0 1px 8px rgba(0,0,0,0.4)",
+};
+
 const linkSx = {
   color: "rgba(255,255,255,0.75)",
   fontSize: 13,
   cursor: "pointer",
+  ...textShadowSx,
   "&:hover": { color: "#fff" },
 };
 
@@ -120,10 +129,10 @@ export default function LoginPage() {
             </Box>
 
           <Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff" }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx }}>
               Secure File Transfer
             </Typography>
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.5 }}>
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.5, ...textShadowSx }}>
               Direct, auditable file exchange between financial institutions.
             </Typography>
           </Box>
@@ -143,10 +152,10 @@ export default function LoginPage() {
         >
           <Stack spacing={2.5}>
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff" }}>
+              <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx }}>
                 Sign in
               </Typography>
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.65)" }}>
+              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.65)", ...textShadowSx }}>
                 Use your institution account
               </Typography>
             </Box>
