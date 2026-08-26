@@ -129,7 +129,7 @@ export default function LoginPage() {
             </Box>
 
           <Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx, textAlign: "center" }}>
               Secure File Transfer
             </Typography>
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.5, ...textShadowSx }}>
