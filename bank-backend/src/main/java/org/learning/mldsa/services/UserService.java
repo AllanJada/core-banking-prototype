@@ -1,6 +1,5 @@
 package org.learning.mldsa.services;
 
-import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.UserRequest;
 import org.learning.mldsa.dtos.UserResponse;
@@ -9,6 +8,7 @@ import org.learning.mldsa.repositories.UserRepositories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.KeyPair;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 public class UserService {
     private final UserRepositories userRepositories;
     private final PasswordEncoder passwordEncoder;
+    private final CryptoService cryptoService;
 
     public UserResponse createNewUser(UserRequest request) {
         if (userRepositories.existsByName(request.getUsername())) {
@@ -26,6 +27,14 @@ public class UserService {
         User user = new User();
         user.setName(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
+
+        // Every institution gets its own ML-DSA-65 key pair at registration. The private
+        // key is used later to sign files this institution sends; the public key is
+        // handed to recipients (implicitly, via lookup) to verify those signatures.
+        KeyPair keyPair = cryptoService.generateMlDsaKeyPair();
+        user.setPublicKey(cryptoService.encodePublicKey(keyPair.getPublic()));
+        user.setPrivateKey(cryptoService.encodePrivateKey(keyPair.getPrivate()));
+
         User savedUser = userRepositories.save(user);
 
         return new UserResponse(savedUser.getUserId(), savedUser.getName());

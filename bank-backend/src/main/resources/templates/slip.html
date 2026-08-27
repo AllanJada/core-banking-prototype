@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title th:text="${slip.title}">Slip</title>
+<style>
+  body { font-family: "Arial", sans-serif; margin: 0; padding: 0; color: #16202A; }
+  .sheet { padding: 24px 32px; }
+
+  .header { text-align: center; margin-bottom: 20px; }
+  .header .logo-placeholder {
+    width: 56px; height: 56px; border-radius: 50%; background: #F4F6F8;
+    border: 1px solid #ccc; margin: 0 auto 8px; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; color: #666;
+  }
+  .header h1 { margin: 4px 0; font-size: 20px; }
+  .header .org { font-size: 13px; color: #51606E; margin: 2px 0; }
+
+  table.info { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+  table.info td { padding: 4px 8px; }
+
+  table.line-items { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.line-items th, table.line-items td { border: 1px solid #ddd; padding: 6px 8px; }
+  table.line-items th { background: #F4F6F8; text-align: left; }
+  table.line-items td.amount, table.line-items th.amount { text-align: right; }
+  .totals-row td { font-weight: bold; }
+
+  .columns { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .columns > tbody > tr > td { width: 50%; vertical-align: top; }
+  .columns > tbody > tr > td:first-child { padding-right: 8px; }
+  .columns > tbody > tr > td:last-child { padding-left: 8px; }
+
+  .amounts { margin: 16px 0; font-size: 13px; }
+  .amounts div { margin-bottom: 4px; }
+
+  .signatures { width: 100%; margin-top: 60px; font-size: 13px; }
+  .signatures td { width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 6px; }
+  .signatures .spacer { width: 10%; border-top: none; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="header">
+    <div class="logo-placeholder">LOGO</div>
+    <h1 th:text="${slip.title}">Payslip</h1>
+    <div class="org" th:text="${slip.organizationName}">Organization Name</div>
+    <div class="org" th:text="${slip.organizationAddress}">Organization Address</div>
+  </div>
+
+  <table class="info">
+    <tr>
+      <td style="width:50%"><strong>Date:</strong> <span th:text="${slip.date}"></span></td>
+      <td><strong>Employee Name:</strong> <span th:text="${slip.employeeName}"></span></td>
+    </tr>
+    <tr>
+      <td><strong>Pay Period:</strong> <span th:text="${slip.payPeriod}"></span></td>
+      <td><strong>Designation:</strong> <span th:text="${slip.designation}"></span></td>
+    </tr>
+    <tr>
+      <td><strong>Worked Days:</strong> <span th:text="${slip.workedDays}"></span></td>
+      <td><strong>Department:</strong> <span th:text="${slip.department}"></span></td>
+    </tr>
+  </table>
+
+  <table class="info">
+    <tr><td><strong>Payer Account:</strong> <span th:text="${slip.payerAccount}"></span></td></tr>
+  </table>
+
+  <table class="columns">
+    <tbody>
+      <tr>
+        <td>
+          <table class="line-items">
+            <thead><tr><th>Earning</th><th class="amount">Amount</th></tr></thead>
+            <tbody>
+              <tr th:each="item : ${slip.earnings}">
+                <td th:text="${item.label}"></td>
+                <td class="amount" th:text="${item.amount}"></td>
+              </tr>
+              <tr class="totals-row">
+                <td>Total Earnings</td>
+                <td class="amount" th:text="${totalEarnings}"></td>
+              </tr>
+            </tbody>
+          </table>
+        </td>
+        <td>
+          <table class="line-items">
+            <thead><tr><th>Deductions</th><th class="amount">Amount</th></tr></thead>
+            <tbody>
+              <tr th:each="item : ${slip.deductions}">
+                <td th:text="${item.label}"></td>
+                <td class="amount" th:text="${item.amount}"></td>
+              </tr>
+              <tr class="totals-row">
+                <td>Net Pay</td>
+                <td class="amount" th:text="${netPay}"></td>
+              </tr>
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="info">
+    <tr><td><strong>Payee Account:</strong> <span th:text="${slip.payeeAccount}"></span></td></tr>
+    <tr><td><strong>Beneficiary Bank:</strong> <span th:text="${slip.beneficiaryBank}"></span></td></tr>
+  </table>
+
+  <div class="amounts">
+    <div><strong>Amount in Numbers:</strong> <span th:text="${netPay}"></span></div>
+    <div><strong>Amount in Words:</strong> <span th:text="${slip.amountInWords}"></span></div>
+  </div>
+
+  <table class="signatures">
+    <tr>
+      <td>Verifier Signature</td>
+      <td class="spacer"></td>
+      <td>Authorizer Signature</td>
+    </tr>
+  </table>
+
+</div>
+</body>
+</html>

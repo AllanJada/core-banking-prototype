@@ -12,6 +12,7 @@ import {
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
 import type { FileTransfer } from "../types";
 import StatusChip from "./StatusChip";
+import SignatureChip from "./SignatureChip";
 import { dataFontFamily } from "../theme";
 
 interface TransferTableProps {
@@ -53,6 +54,7 @@ export default function TransferTable({
             <TableCell>File</TableCell>
             <TableCell>Sent</TableCell>
             <TableCell>Status</TableCell>
+            <TableCell>Signature</TableCell>
             {mode === "inbox" && <TableCell align="right">Action</TableCell>}
             {mode === "outbox" && <TableCell>Received</TableCell>}
           </TableRow>
@@ -71,6 +73,9 @@ export default function TransferTable({
               </TableCell>
               <TableCell>
                 <StatusChip status={transfer.status} />
+              </TableCell>
+              <TableCell>
+                <SignatureChip transfer={transfer} />
               </TableCell>
               {mode === "inbox" && (
                 <TableCell align="right">

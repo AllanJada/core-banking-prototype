@@ -19,4 +19,7 @@ public class FileTransferResponse {
     private String status;
     private Instant sentAt;
     private Instant downloadedAt;
+    private String fileHash;
+    private String signature;
+    private Boolean signatureValid;
 }

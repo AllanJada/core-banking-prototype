@@ -40,4 +40,17 @@ public class FileTransfer {
 
     @Column(name = "downloaded_at")
     private Instant downloadedAt;
+
+    // SHA-384 hash of the file content, computed at send time and re-verified on download.
+    @Column(name = "file_hash")
+    private String fileHash;
+
+    // ML-DSA-65 signatures are ~3.3KB raw / ~4.4KB Base64 — needs TEXT, not varchar(255).
+    @Column(name = "signature", columnDefinition = "TEXT")
+    private String signature;
+
+    // Result of the most recent verification. True at creation time (just signed by us);
+    // re-checked and possibly flipped to false on every download attempt.
+    @Column(name = "signature_valid")
+    private Boolean signatureValid;
 }
