@@ -35,7 +35,7 @@ public class FileStorageService {
     }
 
     /**
-     * Persists the given file under a new server-generated name.
+     * Persists an uploaded file under a new server-generated name.
      *
      * @return the stored filename (not the original filename) — this is what gets saved
      *         alongside the transfer record and used to locate the file later.
@@ -45,7 +45,32 @@ public class FileStorageService {
             throw new RuntimeException("Cannot store an empty file");
         }
 
-        String extension = extractExtension(file.getOriginalFilename());
+        try (var inputStream = file.getInputStream()) {
+            return writeNewFile(inputStream, file.getOriginalFilename());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to store file", e);
+        }
+    }
+
+    /**
+     * Persists server-generated content (e.g. a rendered PDF) that never existed as a
+     * client-supplied file at all — same UUID-naming and path-safety guarantees as the
+     * MultipartFile path above, just without needing to wrap bytes in a fake upload.
+     */
+    public String store(byte[] content, String originalFilename) {
+        if (content == null || content.length == 0) {
+            throw new RuntimeException("Cannot store empty content");
+        }
+
+        try (var inputStream = new java.io.ByteArrayInputStream(content)) {
+            return writeNewFile(inputStream, originalFilename);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to store generated file", e);
+        }
+    }
+
+    private String writeNewFile(java.io.InputStream inputStream, String originalFilename) throws IOException {
+        String extension = extractExtension(originalFilename);
         String storedFilename = UUID.randomUUID() + extension;
 
         Path target = storageRoot.resolve(storedFilename).normalize();
@@ -56,12 +81,7 @@ public class FileStorageService {
             throw new RuntimeException("Invalid storage path");
         }
 
-        try (var inputStream = file.getInputStream()) {
-            Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to store file", e);
-        }
-
+        Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
         return storedFilename;
     }
 

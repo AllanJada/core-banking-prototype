@@ -12,12 +12,14 @@ import {
   Typography,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/SendOutlined";
+import DescriptionIcon from "@mui/icons-material/DescriptionOutlined";
 import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import { useNavigate } from "react-router-dom";
 import { downloadFile, getInbox, getOutbox } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import TransferTable from "../components/TransferTable";
 import SendFileDialog from "../components/SendFileDialog";
+import SlipComposerDialog from "../components/SlipComposerDialog";
 import type { FileTransfer } from "../types";
 
 export default function DashboardPage() {
@@ -28,6 +30,7 @@ export default function DashboardPage() {
   const [inbox, setInbox] = useState<FileTransfer[]>([]);
   const [outbox, setOutbox] = useState<FileTransfer[]>([]);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
+  const [slipDialogOpen, setSlipDialogOpen] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
@@ -87,7 +90,14 @@ export default function DashboardPage() {
       </AppBar>
 
       <Container maxWidth="md" sx={{ py: 4 }}>
-        <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mb: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<DescriptionIcon />}
+            onClick={() => setSlipDialogOpen(true)}
+          >
+            Compose slip
+          </Button>
           <Button
             variant="contained"
             startIcon={<SendIcon />}
@@ -127,6 +137,16 @@ export default function DashboardPage() {
         onClose={() => setSendDialogOpen(false)}
         onSent={() => {
           setSnackbar("File sent");
+          refresh();
+        }}
+        currentUser={user}
+      />
+
+      <SlipComposerDialog
+        open={slipDialogOpen}
+        onClose={() => setSlipDialogOpen(false)}
+        onSent={() => {
+          setSnackbar("Slip generated and sent");
           refresh();
         }}
         currentUser={user}

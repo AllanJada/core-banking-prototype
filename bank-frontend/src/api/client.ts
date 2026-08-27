@@ -1,4 +1,4 @@
-import type { FileTransfer, User } from "../types";
+import type { FileTransfer, SlipRequest, User } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
@@ -68,6 +68,20 @@ export async function sendFile(
   const response = await fetch(`${API_BASE_URL}/api/v1/files/send`, {
     method: "POST",
     body: formData,
+  });
+  return handleResponse<FileTransfer>(response);
+}
+
+/**
+ * Generates and sends a slip in one call — the backend renders the PDF server-side
+ * from these fields and signs the exact resulting bytes, so unlike sendFile() there's
+ * no local File object and nothing to preview client-side beforehand.
+ */
+export async function sendSlip(request: SlipRequest): Promise<FileTransfer> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/slips/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
   });
   return handleResponse<FileTransfer>(response);
 }
