@@ -1,6 +1,9 @@
+export type UserType = "INSTITUTION" | "BANK";
+
 export interface User {
   userId: number;
   username: string;
+  userType: UserType;
 }
 
 export type TransferStatus = "SENT" | "DOWNLOADED";

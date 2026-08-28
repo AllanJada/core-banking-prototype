@@ -23,6 +23,6 @@ public class AuthService {
             throw new RuntimeException("Invalid username or password");
         }
 
-        return new UserResponse(user.getUserId(), user.getName());
+        return new UserResponse(user.getUserId(), user.getName(), user.getUserType());
     }
 }

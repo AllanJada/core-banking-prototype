@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.UserRequest;
 import org.learning.mldsa.dtos.UserResponse;
 import org.learning.mldsa.models.User;
+import org.learning.mldsa.models.UserType;
 import org.learning.mldsa.repositories.UserRepositories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -27,23 +28,25 @@ public class UserService {
         User user = new User();
         user.setName(request.getUsername());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setUserType(request.getUserType() != null ? request.getUserType() : UserType.INSTITUTION);
 
-        // Every institution gets its own ML-DSA-65 key pair at registration. The private
-        // key is used later to sign files this institution sends; the public key is
-        // handed to recipients (implicitly, via lookup) to verify those signatures.
+        // Every account gets its own ML-DSA-65 key pair at registration, regardless of
+        // type. The private key is used later to sign files this account sends; the
+        // public key is handed to recipients (implicitly, via lookup) to verify those
+        // signatures.
         KeyPair keyPair = cryptoService.generateMlDsaKeyPair();
         user.setPublicKey(cryptoService.encodePublicKey(keyPair.getPublic()));
         user.setPrivateKey(cryptoService.encodePrivateKey(keyPair.getPrivate()));
 
         User savedUser = userRepositories.save(user);
 
-        return new UserResponse(savedUser.getUserId(), savedUser.getName());
+        return new UserResponse(savedUser.getUserId(), savedUser.getName(), savedUser.getUserType());
 
     }
 
     public List<UserResponse> listUsers() {
         return userRepositories.findAll().stream()
-                .map(u -> new UserResponse(u.getUserId(), u.getName()))
+                .map(u -> new UserResponse(u.getUserId(), u.getName(), u.getUserType()))
                 .collect(Collectors.toList());
     }
 

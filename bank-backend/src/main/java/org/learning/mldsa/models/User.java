@@ -24,4 +24,12 @@ public class User {
     @Column(name = "private_key", columnDefinition = "TEXT")
     private String privateKey;
 
+    // Distinguishes the two account categories added later: regular institution
+    // accounts (the original dashboard) vs. "bank" accounts (the sidebar dashboard).
+    // Existing rows created before this field existed will read as null — treat that
+    // as INSTITUTION at the call site rather than assuming it's always populated.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type")
+    private UserType userType;
+
 }
