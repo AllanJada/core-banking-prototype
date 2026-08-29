@@ -133,9 +133,13 @@ export default function SlipComposerDialog({
     setError(null);
 
     listUsers()
-      .then((users) => setRecipients(users.filter((u) => u.userId !== currentUser.userId)))
+      .then((users) =>
+        setRecipients(
+          users.filter((u) => u.userId !== currentUser.userId && u.userType === currentUser.userType)
+        )
+      )
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
-  }, [open, currentUser.userId]);
+  }, [open, currentUser.userId, currentUser.userType]);
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(
     key: K,
