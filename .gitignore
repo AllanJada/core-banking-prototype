@@ -32,6 +32,11 @@ build/
 ### VS Code ###
 .vscode/
 
+# Claude Code — local only, never pushed
+CLAUDE.md
+.claude/
+graphify-out/
+
 # Dependency directories
 node_modules/
 jspm_packages/
