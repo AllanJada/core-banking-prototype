@@ -7,15 +7,16 @@ import org.learning.mldsa.models.TransferStatus;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.FileTransferRepository;
 import org.learning.mldsa.repositories.UserRepositories;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 
 @RequiredArgsConstructor
@@ -34,26 +35,22 @@ public class FileTransferService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read uploaded file", e);
         }
-        String storedFilename = fileStorageService.store(file);
-        return signAndPersist(senderId, receiverId, fileBytes, storedFilename, file.getOriginalFilename());
+        return signEncryptAndPersist(senderId, receiverId, fileBytes, file.getOriginalFilename());
+    }
+
+    public FileTransferResponse sendGeneratedFile(Long senderId, Long receiverId,
+                                                   byte[] fileBytes, String filename) {
+        return signEncryptAndPersist(senderId, receiverId, fileBytes, filename);
     }
 
     /**
-     * Sends a server-generated file (e.g. a rendered PDF slip) — the bytes here were
-     * produced entirely server-side (see PdfGenerationService) and never existed as a
-     * client-supplied upload, so there is no client-controlled byte content anywhere
-     * between generation and signing. This is what "coupling generation to sending"
-     * actually buys you: the hash and signature are computed over bytes the client never
-     * had a chance to touch, not just bytes the client happened to upload unmodified.
+     * Two independent crypto layers, in this order:
+     *  1. Hash + sign the PLAINTEXT (unchanged from before ML-KEM was added).
+     *  2. Encapsulate a fresh secret against the RECEIVER's ML-KEM public key and use it
+     *     to AES-256-GCM-encrypt the plaintext — stored instead of the plaintext.
      */
-    public FileTransferResponse sendGeneratedFile(Long senderId, Long receiverId,
-                                                   byte[] fileBytes, String filename) {
-        String storedFilename = fileStorageService.store(fileBytes, filename);
-        return signAndPersist(senderId, receiverId, fileBytes, storedFilename, filename);
-    }
-
-    private FileTransferResponse signAndPersist(Long senderId, Long receiverId, byte[] fileBytes,
-                                                 String storedFilename, String originalFilename) {
+    private FileTransferResponse signEncryptAndPersist(Long senderId, Long receiverId, byte[] fileBytes,
+                                                         String originalFilename) {
         if (senderId.equals(receiverId)) {
             throw new RuntimeException("Sender and receiver must be different users");
         }
@@ -65,6 +62,9 @@ public class FileTransferService {
 
         if (sender.getPrivateKey() == null || sender.getPrivateKey().isBlank()) {
             throw new RuntimeException("Sender does not have an ML-DSA key pair provisioned");
+        }
+        if (receiver.getKemPublicKey() == null || receiver.getKemPublicKey().isBlank()) {
+            throw new RuntimeException("Receiver does not have an ML-KEM key pair provisioned");
         }
 
         String fileHash = cryptoService.hashFile(fileBytes);
@@ -79,6 +79,12 @@ public class FileTransferService {
         PrivateKey senderPrivateKey = cryptoService.decodePrivateKey(sender.getPrivateKey());
         String signature = cryptoService.sign(envelope, senderPrivateKey);
 
+        PublicKey receiverKemPublicKey = cryptoService.decodeKemPublicKey(receiver.getKemPublicKey());
+        CryptoService.Encapsulation encapsulation = cryptoService.encapsulate(receiverKemPublicKey);
+        byte[] encryptedBytes = cryptoService.encryptWithSharedSecret(fileBytes, encapsulation.sharedSecret());
+
+        String storedFilename = fileStorageService.store(encryptedBytes, originalFilename);
+
         FileTransfer transfer = new FileTransfer();
         transfer.setSender(sender);
         transfer.setReceiver(receiver);
@@ -89,6 +95,7 @@ public class FileTransferService {
         transfer.setSignatureValid(true); // known-true right now; re-checked on every download
         transfer.setStatus(TransferStatus.SENT);
         transfer.setSentAt(sentAt);
+        transfer.setKemCiphertext(Base64.getEncoder().encodeToString(encapsulation.kemCiphertext()));
 
         FileTransfer saved = fileTransferRepository.save(transfer);
         return toResponse(saved);
@@ -112,19 +119,19 @@ public class FileTransferService {
      * Loads the file for download and, if this is the first download, flips the transfer's
      * status to DOWNLOADED. Scoped so only the actual recipient can download it.
      *
-     * Before serving the file, independently recomputes its hash from the bytes actually
-     * on disk right now and re-verifies the ML-DSA signature against the sender's stored
-     * public key. This confirms both that the file hasn't been altered since it was
-     * signed, and that the signature really was produced by the claimed sender's key —
-     * not merely that the database's own stored fields agree with each other.
+     * Decrypts first (ML-KEM decapsulate + AES-256-GCM decrypt, using the RECEIVER's own
+     * key) to recover the plaintext, then runs the exact same integrity/authenticity check
+     * that existed before encryption was added: independently recompute the hash from the
+     * decrypted bytes and re-verify the ML-DSA signature against the sender's stored public
+     * key. This confirms both that the plaintext hasn't been altered since it was signed,
+     * and that the signature really was produced by the claimed sender's key — not merely
+     * that the database's own stored fields agree with each other.
      */
     public FileDownload downloadFile(Long transferId, Long userId) {
         FileTransfer transfer = fileTransferRepository.findByTransferIdAndReceiver_UserId(transferId, userId)
                 .orElseThrow(() -> new RuntimeException("File not found, or you are not the recipient"));
 
-        Resource resource = fileStorageService.loadAsResource(transfer.getStoredFilename());
-
-        verifyIntegrityOrThrow(transfer, resource);
+        byte[] plaintext = decryptAndVerifyOrThrow(transfer);
 
         if (transfer.getStatus() != TransferStatus.DOWNLOADED) {
             transfer.setStatus(TransferStatus.DOWNLOADED);
@@ -132,37 +139,52 @@ public class FileTransferService {
             fileTransferRepository.save(transfer);
         }
 
+        Resource resource = new ByteArrayResource(plaintext);
         return new FileDownload(resource, transfer.getOriginalFilename());
     }
 
-    private void verifyIntegrityOrThrow(FileTransfer transfer, Resource resource) {
+    private byte[] decryptAndVerifyOrThrow(FileTransfer transfer) {
         User sender = transfer.getSender();
+        User receiver = transfer.getReceiver();
 
         if (sender.getPublicKey() == null || sender.getPublicKey().isBlank()
                 || transfer.getSignature() == null || transfer.getFileHash() == null) {
             markInvalid(transfer);
             throw new RuntimeException("This transfer has no valid signature on record and cannot be verified");
         }
-
-        byte[] currentBytes;
-        try (InputStream in = resource.getInputStream()) {
-            currentBytes = in.readAllBytes();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to read stored file for verification", e);
+        if (receiver.getKemPrivateKey() == null || receiver.getKemPrivateKey().isBlank()
+                || transfer.getKemCiphertext() == null) {
+            markInvalid(transfer);
+            throw new RuntimeException("This transfer has no encryption key material on record and cannot be decrypted");
         }
 
-        String currentHash = cryptoService.hashFile(currentBytes);
+        byte[] storedBytes;
+        try (var in = fileStorageService.loadAsResource(transfer.getStoredFilename()).getInputStream()) {
+            storedBytes = in.readAllBytes();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read stored file for decryption", e);
+        }
+
+        byte[] plaintext;
+        try {
+            PrivateKey receiverKemPrivateKey = cryptoService.decodeKemPrivateKey(receiver.getKemPrivateKey());
+            byte[] kemCiphertext = Base64.getDecoder().decode(transfer.getKemCiphertext());
+            byte[] sharedSecret = cryptoService.decapsulate(receiverKemPrivateKey, kemCiphertext);
+            plaintext = cryptoService.decryptWithSharedSecret(storedBytes, sharedSecret);
+        } catch (RuntimeException e) {
+            markInvalid(transfer);
+            throw new RuntimeException("Decryption failed: wrong key, or the stored file was altered", e);
+        }
+
+        String currentHash = cryptoService.hashFile(plaintext);
         if (!currentHash.equals(transfer.getFileHash())) {
             markInvalid(transfer);
-            throw new RuntimeException("File integrity check failed: stored file no longer matches its signed hash");
+            throw new RuntimeException("File integrity check failed: decrypted content no longer matches its signed hash");
         }
 
         String envelope = cryptoService.buildEnvelope(
-                transfer.getSender().getUserId(),
-                transfer.getReceiver().getUserId(),
-                transfer.getFileHash(),
-                transfer.getOriginalFilename(),
-                transfer.getSentAt().toEpochMilli()
+                sender.getUserId(), receiver.getUserId(), transfer.getFileHash(),
+                transfer.getOriginalFilename(), transfer.getSentAt().toEpochMilli()
         );
 
         PublicKey senderPublicKey = cryptoService.decodePublicKey(sender.getPublicKey());
@@ -177,6 +199,8 @@ public class FileTransferService {
             transfer.setSignatureValid(true);
             fileTransferRepository.save(transfer);
         }
+
+        return plaintext;
     }
 
     private void markInvalid(FileTransfer transfer) {

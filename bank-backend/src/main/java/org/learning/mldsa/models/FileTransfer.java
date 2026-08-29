@@ -23,11 +23,12 @@ public class FileTransfer {
     @JoinColumn(name = "receiver_id", nullable = false)
     private User receiver;
 
-    // The filename as the sender's browser reported it — display-only, never used as a storage path.
     @Column(name = "original_filename", nullable = false)
     private String originalFilename;
 
     // Server-generated name the file is actually stored under on disk (see FileStorageService).
+    // What's on disk under this name is now the AES-256-GCM-encrypted blob, not plaintext —
+    // see kemCiphertext below for how to get back to plaintext.
     @Column(name = "stored_filename", nullable = false, unique = true)
     private String storedFilename;
 
@@ -41,16 +42,21 @@ public class FileTransfer {
     @Column(name = "downloaded_at")
     private Instant downloadedAt;
 
-    // SHA-384 hash of the file content, computed at send time and re-verified on download.
+    // SHA-384 hash of the PLAINTEXT file content, computed at send time (before
+    // encryption) and re-verified on download (after decryption). Never the hash of the
+    // encrypted bytes on disk — signing and encryption are independent layers.
     @Column(name = "file_hash")
     private String fileHash;
 
-    // ML-DSA-65 signatures are ~3.3KB raw / ~4.4KB Base64 — needs TEXT, not varchar(255).
     @Column(name = "signature", columnDefinition = "TEXT")
     private String signature;
 
-    // Result of the most recent verification. True at creation time (just signed by us);
-    // re-checked and possibly flipped to false on every download attempt.
     @Column(name = "signature_valid")
     private Boolean signatureValid;
+
+    // ML-KEM-768 ciphertext from encapsulating against the receiver's public key at send
+    // time (~1.6KB Base64) — the receiver decapsulates this with their own private key to
+    // recover the AES-256-GCM key that decrypts storedFilename's contents.
+    @Column(name = "kem_ciphertext", columnDefinition = "TEXT")
+    private String kemCiphertext;
 }

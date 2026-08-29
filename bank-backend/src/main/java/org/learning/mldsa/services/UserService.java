@@ -31,14 +31,19 @@ public class UserService {
         // Every institution gets its own ML-DSA-65 key pair at registration. The private
         // key is used later to sign files this institution sends; the public key is
         // handed to recipients (implicitly, via lookup) to verify those signatures.
-        KeyPair keyPair = cryptoService.generateMlDsaKeyPair();
-        user.setPublicKey(cryptoService.encodePublicKey(keyPair.getPublic()));
-        user.setPrivateKey(cryptoService.encodePrivateKey(keyPair.getPrivate()));
+        KeyPair dsaKeyPair = cryptoService.generateMlDsaKeyPair();
+        user.setPublicKey(cryptoService.encodePublicKey(dsaKeyPair.getPublic()));
+        user.setPrivateKey(cryptoService.encodePrivateKey(dsaKeyPair.getPrivate()));
+
+        // And its own ML-KEM-768 key pair — senders encapsulate against this institution's
+        // kemPublicKey to derive the AES key that encrypts files addressed to it; only this
+        // institution's kemPrivateKey can decapsulate that back to the same key.
+        KeyPair kemKeyPair = cryptoService.generateMlKemKeyPair();
+        user.setKemPublicKey(cryptoService.encodeKemPublicKey(kemKeyPair.getPublic()));
+        user.setKemPrivateKey(cryptoService.encodeKemPrivateKey(kemKeyPair.getPrivate()));
 
         User savedUser = userRepositories.save(user);
-
         return new UserResponse(savedUser.getUserId(), savedUser.getName());
-
     }
 
     public List<UserResponse> listUsers() {
@@ -46,5 +51,4 @@ public class UserService {
                 .map(u -> new UserResponse(u.getUserId(), u.getName()))
                 .collect(Collectors.toList());
     }
-
 }
