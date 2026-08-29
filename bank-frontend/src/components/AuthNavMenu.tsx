@@ -39,7 +39,7 @@ export default function AuthNavMenu({ targetLabel, targetPath }: AuthNavMenuProp
         onClick={handleOpen}
         aria-label="Open navigation menu"
         sx={{
-          position: "absolute",
+          position: "fixed",
           top: 16,
           left: 16,
           color: "#fff",

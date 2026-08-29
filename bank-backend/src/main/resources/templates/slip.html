@@ -9,9 +9,19 @@
 
   .header { text-align: center; margin-bottom: 20px; }
   .header .logo-placeholder {
-    width: 56px; height: 56px; border-radius: 50%; background: #F4F6F8;
-    border: 1px solid #ccc; margin: 0 auto 8px; display: flex; align-items: center;
-    justify-content: center; font-size: 11px; color: #666;
+    width: 128px;
+    height: 128px;
+    border-radius: 50%;
+    margin: 0 auto 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    /* Logo Settings */
+    background-image: url("cardLogo.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: cover;
   }
   .header h1 { margin: 4px 0; font-size: 20px; }
   .header .org { font-size: 13px; color: #51606E; margin: 2px 0; }
@@ -42,7 +52,7 @@
 <div class="sheet">
 
   <div class="header">
-    <div class="logo-placeholder">LOGO</div>
+    <div class="logo-placeholder"></div>
     <h1 th:text="${slip.title}">Payslip</h1>
     <div class="org" th:text="${slip.organizationName}">Organization Name</div>
     <div class="org" th:text="${slip.organizationAddress}">Organization Address</div>
