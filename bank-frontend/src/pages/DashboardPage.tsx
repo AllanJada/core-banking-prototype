@@ -89,7 +89,14 @@ export default function DashboardPage() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: 4 }}>
+      {/* lg, not md: at md (900px) the transfer table's six columns force
+          the TableContainer into horizontal scroll on an ordinary desktop
+          viewport even though there's plenty of unused width either side —
+          confirmed by rendering it with real data, not just from reading
+          the JSX. A dense data table should use available width rather
+          than scroll sideways for no reason (component-patterns.md's
+          dashboard guidance). */}
+      <Container maxWidth="lg" sx={{ py: 4 }}>
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mb: 2 }}>
           <Button
             variant="outlined"
@@ -98,8 +105,15 @@ export default function DashboardPage() {
           >
             Compose slip
           </Button>
+          {/* Outlined, matching "Compose slip": these are two equally-valid
+              ways to start the same underlying task (get a document to a
+              recipient), not a primary/secondary pair — a single contained
+              button here would claim one is "more correct" than the other,
+              which isn't true. See 07-buttons.md's "genuinely equal
+              importance" guidance (its own example: "Report" vs. "Don't
+              report," both secondary weight). */}
           <Button
-            variant="contained"
+            variant="outlined"
             startIcon={<SendIcon />}
             onClick={() => setSendDialogOpen(true)}
           >
@@ -126,7 +140,12 @@ export default function DashboardPage() {
                 downloadingId={downloadingId}
               />
             ) : (
-              <TransferTable mode="outbox" transfers={outbox} />
+              <TransferTable
+                mode="outbox"
+                transfers={outbox}
+                onComposeSlip={() => setSlipDialogOpen(true)}
+                onSendFile={() => setSendDialogOpen(true)}
+              />
             )}
           </Box>
         </Paper>

@@ -1,23 +1,31 @@
 import Paper, { type PaperProps } from "@mui/material/Paper";
 import { alpha, useTheme } from "@mui/material/styles";
+import { glassTokens } from "../theme";
 
 export type GlassFrost = "none" | "light" | "heavy";
 
-// Per the four pillars of glassmorphism (transparency, blur, a defined border,
-// layered hierarchy): opacity stays within the 20-40% white-fill range that
-// keeps text readable against a busy background, and blur strength scales
-// with how much that panel needs to stand out. "none" is a plain bordered
-// shell with no fill/blur at all, for wrapping other frosted panels.
+// "none" is a genuinely plain, transparent bordered shell — for elements
+// that hold no text of their own (e.g. the outer wrapper in LoginPage,
+// which exists only to draw one shared border/shadow around two inner
+// panels). Anything that *does* carry text needs "light" or "heavy": both
+// alpha values come from theme.ts's glassTokens, computed to keep text
+// readable even where the photo behind them is at its brightest — see the
+// comment there for the actual contrast numbers. Blur increases alongside
+// alpha (8px / 14px) so the strongest panel is also the calmest backdrop
+// for reading, not just the darkest.
 const FROST_CONFIG: Record<GlassFrost, { alpha: number; blur: number }> = {
-  none: { alpha: 0.16, blur: 0 },
-  light: { alpha: 0.05, blur: 6 },
-  heavy: { alpha: 0.09, blur: 12 },
+  none: { alpha: 0, blur: 0 },
+  light: { alpha: glassTokens.lightGlassAlpha, blur: 8 },
+  heavy: { alpha: glassTokens.heavyGlassAlpha, blur: 14 },
 };
 
 interface GlassCardProps extends PaperProps {
-  /** How strongly frosted this panel is. Defaults to "heavy" (the original
-   * single-panel look). Use "none" for a plain bordered shell, "light" for a
-   * panel that should stay closer to see-through. */
+  /** How strongly frosted this panel is. Defaults to "heavy". Use "none" for
+   * a plain transparent shell around other frosted panels (no text of its
+   * own); "light" for a panel with text that should still read as closer to
+   * see-through than "heavy". Both "light" and "heavy" guarantee accessible
+   * text contrast — "light" is not a lighter-touch accessibility trade-off,
+   * just a visually calmer one. */
   frost?: GlassFrost;
 }
 
@@ -38,20 +46,25 @@ export default function GlassCard({ sx, frost = "heavy", ...props }: GlassCardPr
         background: frostAlpha > 0 ? alpha("#000000", frostAlpha) : "transparent",
         backdropFilter: isFrosted ? `blur(${blur}px)` : "none",
         WebkitBackdropFilter: isFrosted ? `blur(${blur}px)` : "none",
-        // The defined border: not decorative, it's what keeps the panel's
-        // edges readable for low-vision users once the blur softens them.
-        border: `1px solid ${alpha("#000000", 0.18)}`,
+        // A light edge, not a dark one: once a panel is frosted its interior
+        // reads as a dark surface regardless of what's behind it (that's the
+        // point of the tint), so a light border is what actually stays
+        // visible against both the dark interior and an arbitrary, variable
+        // photo just outside it. Kept even on "none" for the same reason
+        // GlassCard existed in the first place — a visible edge so a
+        // transparent panel doesn't look like a layout accident.
+        border: `1px solid ${alpha("#FFFFFF", frost === "none" ? 0.16 : 0.22)}`,
         borderRadius: Number(theme.shape.borderRadius),
-        boxShadow: frost === "none" ? "none" : "0 8px 32px 0 rgba(0, 0, 0, 0.35)",
+        boxShadow: frost === "none" ? "none" : "0 8px 32px 0 rgba(0, 0, 0, 0.4)",
 
         // Fallback for browsers without backdrop-filter support
         ...(isFrosted && {
           "@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))": {
-            background: "rgba(13, 31, 51, 0.92)",
+            background: "rgba(13, 31, 51, 0.94)",
           },
           // Respect users who've asked for reduced transparency
           "@media (prefers-reduced-transparency: reduce)": {
-            background: "rgba(13, 31, 51, 0.95)",
+            background: "rgba(13, 31, 51, 0.96)",
             backdropFilter: "none",
             WebkitBackdropFilter: "none",
           },

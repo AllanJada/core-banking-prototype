@@ -24,6 +24,13 @@ export default function SignatureChip({ transfer }: { transfer: FileTransfer }) 
           label="Unsigned"
           size="small"
           variant="outlined"
+          // Deliberately neutral, unlike the other three states — no
+          // signature isn't a status worth alarming or celebrating, just a
+          // fact. MUI's default outlined/no-colour chip border is very
+          // faint (~1.9:1 against white, under the 3:1 non-text-UI
+          // minimum); this keeps the same neutral grey but dark enough to
+          // actually read as a chip boundary (3.35:1).
+          sx={{ borderColor: "rgba(0,0,0,0.45)" }}
         />
       </Tooltip>
     );

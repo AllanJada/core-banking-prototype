@@ -3,6 +3,7 @@ import type { SvgIconComponent } from "@mui/icons-material";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import SwapHorizOutlinedIcon from "@mui/icons-material/SwapHorizOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import { glassTokens } from "../theme";
 
 interface Highlight {
   icon: SvgIconComponent;
@@ -17,10 +18,12 @@ const HIGHLIGHTS: Highlight[] = [
   { icon: VisibilityOutlinedIcon, text: "Full visibility into every transfer's status" },
 ];
 
-// Same readability workaround as LoginPage: a dark halo behind text/icons,
-// independent of whatever frost level the parent panel is set to.
+// Same readability approach as LoginPage: a secondary shadow touch behind
+// the text, on top of (not instead of) the panel's own contrast-guaranteeing
+// scrim — see glassTokens in theme.ts for where the actual guarantee comes
+// from.
 const textShadowSx = {
-  textShadow: "0 1px 3px rgba(0,0,0,0.65), 0 1px 8px rgba(0,0,0,0.4)",
+  textShadow: "0 1px 3px rgba(0,0,0,0.5)",
 };
 
 export default function SecurityHighlights() {
@@ -39,14 +42,15 @@ export default function SecurityHighlights() {
               justifyContent: "center",
               // Solid dark backing (not glass — just a plain translucent-black
               // circle) so the icon reads clearly regardless of the parent
-              // panel's frost setting.
+              // panel's frost setting. Sits on top of the panel's own scrim,
+              // so it only ever gets darker/safer from here, never lighter.
               background: "rgba(0,0,0,0.35)",
               boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
             }}
           >
-            <Icon sx={{ color: "#fff", fontSize: 18 }} />
+            <Icon sx={{ color: glassTokens.textStrong, fontSize: 18 }} />
           </Box>
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.9)", ...textShadowSx }}>
+          <Typography variant="body2" sx={{ color: glassTokens.textStrong, ...textShadowSx }}>
             {text}
           </Typography>
         </Stack>

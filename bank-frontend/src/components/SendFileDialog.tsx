@@ -100,6 +100,7 @@ export default function SendFileDialog({
             value={receiverId}
             onChange={(e) => setReceiverId(Number(e.target.value))}
             fullWidth
+            required
           >
             {recipients.map((user) => (
               <MenuItem key={user.userId} value={user.userId}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -9,6 +9,7 @@ import {
   DialogTitle,
   Divider,
   IconButton,
+  InputAdornment,
   MenuItem,
   Stack,
   TextField,
@@ -32,6 +33,14 @@ function emptyLineItem(): SlipLineItem {
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function sumItems(items: SlipLineItem[]): number {
+  return items.reduce((total, item) => total + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+}
+
+function formatAmount(value: number): string {
+  return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function emptyForm() {
@@ -94,12 +103,18 @@ function LineItemEditor({
             <TextField
               size="small"
               type="number"
-              placeholder="Amount"
+              placeholder="0"
               value={item.amount === 0 ? "" : item.amount}
               onChange={(e) => updateRow(index, { amount: Number(e.target.value) || 0 })}
-              sx={{ flex: 1 }}
+              slotProps={{
+                input: {
+                  startAdornment: <InputAdornment position="start">TSh</InputAdornment>,
+                  inputProps: { min: 0, inputMode: "decimal" },
+                },
+              }}
+              sx={{ flex: 1.3 }}
             />
-            <IconButton size="small" onClick={() => removeRow(index)} aria-label="Remove row">
+            <IconButton size="small" onClick={() => removeRow(index)} aria-label={`Remove ${title.toLowerCase()} row`}>
               <DeleteIcon fontSize="small" />
             </IconButton>
           </Stack>
@@ -136,6 +151,14 @@ export default function SlipComposerDialog({
       .then((users) => setRecipients(users.filter((u) => u.userId !== currentUser.userId)))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
   }, [open, currentUser.userId]);
+
+  // Computed, not typed in: the whole point is that nobody has to add these
+  // up by hand to sanity-check the slip before sending it (Tesler's Law —
+  // this is arithmetic the interface should absorb, not hand to the person
+  // filling out the form).
+  const totalEarnings = useMemo(() => sumItems(earnings), [earnings]);
+  const totalDeductions = useMemo(() => sumItems(deductions), [deductions]);
+  const netPay = totalEarnings - totalDeductions;
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(
     key: K,
@@ -200,6 +223,7 @@ export default function SlipComposerDialog({
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               select
+              required
               label="Recipient"
               value={form.receiverId}
               onChange={(e) => setField("receiverId", Number(e.target.value))}
@@ -220,7 +244,9 @@ export default function SlipComposerDialog({
           </Stack>
 
           <Divider />
-          <Typography variant="subtitle2">Organization</Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Organization
+          </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               label="Organization name"
@@ -237,7 +263,9 @@ export default function SlipComposerDialog({
           </Stack>
 
           <Divider />
-          <Typography variant="subtitle2">Employee</Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Employee
+          </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               label="Date"
@@ -248,6 +276,7 @@ export default function SlipComposerDialog({
               slotProps={{ inputLabel: { shrink: true } }}
             />
             <TextField
+              required
               label="Employee name"
               value={form.employeeName}
               onChange={(e) => setField("employeeName", e.target.value)}
@@ -275,6 +304,7 @@ export default function SlipComposerDialog({
               type="number"
               value={form.workedDays}
               onChange={(e) => setField("workedDays", e.target.value === "" ? "" : Number(e.target.value))}
+              slotProps={{ htmlInput: { min: 0, max: 31 } }}
               fullWidth
             />
             <TextField
@@ -286,7 +316,9 @@ export default function SlipComposerDialog({
           </Stack>
 
           <Divider />
-          <Typography variant="subtitle2">Accounts</Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Accounts
+          </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
             <TextField
               label="Payer account"
@@ -309,10 +341,62 @@ export default function SlipComposerDialog({
           </Stack>
 
           <Divider />
+          <Typography variant="subtitle2" color="text.secondary">
+            Earnings &amp; deductions
+          </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={3}>
             <LineItemEditor title="Earnings" items={earnings} onChange={setEarnings} />
             <LineItemEditor title="Deductions" items={deductions} onChange={setDeductions} />
           </Stack>
+
+          {/* Computed summary, not another input — reflects the rows above
+              back at whoever's filling this in so a typo (an extra zero, a
+              deduction in the earnings column) is obvious before sending
+              rather than discovered on the printed slip. */}
+          <Box
+            sx={{
+              px: 2,
+              py: 1.5,
+              borderRadius: 1,
+              bgcolor: "background.default",
+              border: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            <Stack spacing={0.5}>
+              <Stack direction="row" sx={{ justifyContent: "space-between" }}>
+                <Typography variant="body2" color="text.secondary">
+                  Total earnings
+                </Typography>
+                <Typography variant="body2" sx={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                  TSh {formatAmount(totalEarnings)}
+                </Typography>
+              </Stack>
+              <Stack direction="row" sx={{ justifyContent: "space-between" }}>
+                <Typography variant="body2" color="text.secondary">
+                  Total deductions
+                </Typography>
+                <Typography variant="body2" sx={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                  TSh {formatAmount(totalDeductions)}
+                </Typography>
+              </Stack>
+              <Divider sx={{ my: 0.5 }} />
+              <Stack direction="row" sx={{ justifyContent: "space-between" }}>
+                <Typography variant="subtitle2">Net pay</Typography>
+                <Typography
+                  variant="subtitle2"
+                  sx={{ fontFamily: "IBM Plex Mono, monospace", color: netPay < 0 ? "error.main" : "text.primary" }}
+                >
+                  TSh {formatAmount(netPay)}
+                </Typography>
+              </Stack>
+              {netPay < 0 && (
+                <Typography variant="caption" color="error.main">
+                  Deductions exceed earnings — double-check the rows above before sending.
+                </Typography>
+              )}
+            </Stack>
+          </Box>
 
           <TextField
             label="Amount in words"

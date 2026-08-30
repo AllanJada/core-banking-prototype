@@ -20,35 +20,66 @@ import { useAuth } from "../context/AuthContext";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
 import SecurityHighlights from "../components/SecurityHighlights";
+import { glassTokens } from "../theme";
 
-// Translucent styling for inputs sitting on the glass panel.
+// Translucent styling for inputs sitting on the glass panel. Border/label
+// colours use glassTokens.accent (not the app's base teal) for the same
+// contrast reason as everywhere else on this screen — see theme.ts.
+//
+// The `:-webkit-autofill` block exists for a real, verified bug, not a
+// hypothetical: Chrome forces its own opaque fill (measured on the live page —
+// rgb(232,240,254), its standard autofill blue) and forces black input text
+// (webkitTextFillColor: rgb(0,0,0)) on any field it autofills, both applied
+// with higher specificity than a normal backgroundColor/color override can
+// beat. On a solid light form that's barely noticeable; on this dark glass
+// panel it replaces the intended translucent field with an opaque light-blue
+// box, which is exactly the "padding looks wrong" effect Ramsey flagged —
+// the notched label (correct, standard MUI behaviour — it's meant to overlap
+// the border line by design) suddenly reads as broken because it's sitting
+// against a jarring solid colour instead of the translucent glass it was
+// designed against.
+//
+// First attempt used the field's own translucent colour
+// (rgba(255,255,255,0.07)) for the override box-shadow — checked live on the
+// running page and it did NOT work: Chrome's own fill is opaque and sits
+// underneath at a layer a 7%-alpha shadow can't fully mask, so the pale blue
+// still showed through almost unchanged. An inset box-shadow can only truly
+// win against Chrome's fill by being opaque itself, so this uses
+// glassTokens.autofillBg (navyDark) instead — a flat approximation of the
+// panel's own dark tone rather than genuine translucency, which Chrome
+// doesn't leave a way to preserve here. `-webkit-text-fill-color` restores
+// the intended light text colour (a plain `color` override does not work on
+// autofilled text — Chrome ignores it).
 const glassInputSx = {
   "& .MuiOutlinedInput-root": {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: 2,
-    "& fieldset": { borderColor: "rgba(255,255,255,0.25)" },
-    "&:hover fieldset": { borderColor: "rgba(255,255,255,0.45)" },
-    "&.Mui-focused fieldset": { borderColor: "#1F9E89" },
+    backgroundColor: "rgba(255,255,255,0.07)",
+    "& fieldset": { borderColor: "rgba(255,255,255,0.3)" },
+    "&:hover fieldset": { borderColor: "rgba(255,255,255,0.5)" },
+    "&.Mui-focused fieldset": { borderColor: glassTokens.accent, borderWidth: 2 },
   },
-  "& .MuiInputBase-input": { color: "#fff" },
-  "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.75)" },
-  "& .MuiInputLabel-root.Mui-focused": { color: "#1F9E89" },
+  "& .MuiInputBase-input": { color: glassTokens.textStrong },
+  "& .MuiInputLabel-root": { color: glassTokens.textWeak },
+  "& .MuiInputLabel-root.Mui-focused": { color: glassTokens.accent },
+  "& input:-webkit-autofill, & input:-webkit-autofill:hover, & input:-webkit-autofill:focus": {
+    WebkitBoxShadow: `0 0 0 100px ${glassTokens.autofillBg} inset`,
+    WebkitTextFillColor: glassTokens.textStrong,
+    caretColor: glassTokens.textStrong,
+  },
 };
 
-// Readability workaround, independent of the glass panels themselves: a soft
-// dark halo behind light text so it stays legible over whatever happens to
-// be directly behind it in the photo (sky, glass, foliage all vary a lot).
-// Doesn't touch GlassCard's blur/opacity/frost config at all.
+// Secondary touch only, not the primary contrast fix — the scrim strength in
+// GlassCard/glassTokens is what actually guarantees readable text. This just
+// softens the edge slightly further.
 const textShadowSx = {
-  textShadow: "0 1px 3px rgba(0,0,0,0.65), 0 1px 8px rgba(0,0,0,0.4)",
+  textShadow: "0 1px 3px rgba(0,0,0,0.5)",
 };
 
 const linkSx = {
-  color: "rgba(255,255,255,0.75)",
+  color: glassTokens.textLink,
   fontSize: 13,
   cursor: "pointer",
   ...textShadowSx,
-  "&:hover": { color: "#fff" },
+  "&:hover": { color: glassTokens.textStrong },
 };
 
 export default function LoginPage() {
@@ -90,9 +121,11 @@ export default function LoginPage() {
           overflow: "hidden",
         }}
       >
-        {/* Branding panel — lightly frosted, stays closer to see-through */}
+        {/* Branding panel — frosted enough to guarantee readable text (see
+            glassTokens in theme.ts), but the lighter of the two panels so it
+            still reads as closer to see-through than the form beside it. */}
         <GlassCard
-          frost="none"
+          frost="light"
           elevation={0}
           sx={{
             flex: 1,
@@ -105,8 +138,8 @@ export default function LoginPage() {
             border: "none",
             borderRadius: 0,
             boxShadow: "none",
-            borderRight: { md: "1px solid rgba(255,255,255,0.14)" },
-            borderBottom: { xs: "1px solid rgba(255,255,255,0.14)", md: "none" },
+            borderRight: { md: "1px solid rgba(255,255,255,0.2)" },
+            borderBottom: { xs: "1px solid rgba(255,255,255,0.2)", md: "none" },
           }}
         >
             <Box
@@ -129,10 +162,13 @@ export default function LoginPage() {
             </Box>
 
           <Box>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx, textAlign: "center" }}>
+            <Typography
+              variant="h6"
+              sx={{ color: glassTokens.textStrong, ...textShadowSx, textAlign: "center" }}
+            >
               Secure File Transfer
             </Typography>
-            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.5, ...textShadowSx }}>
+            <Typography variant="body2" sx={{ color: glassTokens.textWeak, mt: 0.5, ...textShadowSx }}>
               Direct, auditable file exchange between financial institutions.
             </Typography>
           </Box>
@@ -142,7 +178,8 @@ export default function LoginPage() {
           </Box>
         </GlassCard>
 
-        {/* Form panel — more heavily frosted, prioritizes input legibility */}
+        {/* Form panel — the more strongly frosted of the two, since input
+            legibility here matters more than how much photo shows through. */}
         <GlassCard
           frost="heavy"
           elevation={0}
@@ -152,10 +189,10 @@ export default function LoginPage() {
         >
           <Stack spacing={2.5}>
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx }}>
+              <Typography variant="h6" sx={{ color: glassTokens.textStrong, ...textShadowSx }}>
                 Sign in
               </Typography>
-              <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.65)", ...textShadowSx }}>
+              <Typography variant="body2" sx={{ color: glassTokens.textWeak, ...textShadowSx }}>
                 Use your institution account
               </Typography>
             </Box>
@@ -187,7 +224,7 @@ export default function LoginPage() {
                       <IconButton
                         onClick={() => setShowPassword((v) => !v)}
                         edge="end"
-                        sx={{ color: "rgba(255,255,255,0.6)" }}
+                        sx={{ color: glassTokens.textWeak }}
                         aria-label={showPassword ? "Hide password" : "Show password"}
                       >
                         {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
@@ -198,6 +235,11 @@ export default function LoginPage() {
               }}
             />
 
+            {/* Solid fill, so this is a plain white-vs-teal contrast question —
+                the glass-panel accent colour doesn't apply here, since the
+                button isn't translucent against the photo. Text is navy, not
+                white: white-on-this-teal only reaches ~3.3:1 (fails the 4.5:1
+                button-text minimum), navy-on-teal reaches 5:1. */}
             <Button
               type="submit"
               variant="contained"
@@ -205,11 +247,12 @@ export default function LoginPage() {
               disabled={submitting}
               fullWidth
               sx={{
-                borderRadius: 2,
                 py: 1.3,
                 bgcolor: "#1F9E89",
-                boxShadow: "0 4px 14px rgba(31, 158, 137, 0.35)",
-                "&:hover": { bgcolor: "#188275" },
+                color: "#0D1F33",
+                fontWeight: 700,
+                boxShadow: "0 4px 14px rgba(31, 158, 137, 0.4)",
+                "&:hover": { bgcolor: "#28B79E" },
               }}
             >
               {submitting ? "Signing in…" : "Sign In"}

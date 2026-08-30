@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Stack,
   Table,
   TableBody,
   TableCell,
@@ -10,6 +11,8 @@ import {
   Typography,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import SendIcon from "@mui/icons-material/SendOutlined";
+import DescriptionIcon from "@mui/icons-material/DescriptionOutlined";
 import type { FileTransfer } from "../types";
 import StatusChip from "./StatusChip";
 import SignatureChip from "./SignatureChip";
@@ -20,6 +23,14 @@ interface TransferTableProps {
   transfers: FileTransfer[];
   onDownload?: (transfer: FileTransfer) => void;
   downloadingId?: number | null;
+  /** Outbox empty state only — same icon/label/weight as the dashboard
+   * toolbar's buttons, so the empty state reads as an echo of them, not a
+   * new affordance. Omitted for inbox: nothing the user does here produces
+   * inbound transfers, so a button would promise an action that doesn't
+   * actually resolve the empty state (component-patterns.md's empty-state
+   * rule is about giving a *real* next action, not a button for its own sake). */
+  onComposeSlip?: () => void;
+  onSendFile?: () => void;
 }
 
 function formatTimestamp(value: string | null): string {
@@ -32,15 +43,32 @@ export default function TransferTable({
   transfers,
   onDownload,
   downloadingId,
+  onComposeSlip,
+  onSendFile,
 }: TransferTableProps) {
   if (transfers.length === 0) {
+    const showActions = mode === "outbox" && (onComposeSlip || onSendFile);
     return (
       <Box sx={{ py: 6, textAlign: "center" }}>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="text.secondary" sx={{ mb: showActions ? 2.5 : 0 }}>
           {mode === "inbox"
-            ? "Nothing in your inbox yet."
+            ? "Files sent to you by other institutions will appear here."
             : "You haven't sent any files yet."}
         </Typography>
+        {showActions && (
+          <Stack direction="row" spacing={1.5} sx={{ justifyContent: "center" }}>
+            {onComposeSlip && (
+              <Button variant="outlined" startIcon={<DescriptionIcon />} onClick={onComposeSlip}>
+                Compose slip
+              </Button>
+            )}
+            {onSendFile && (
+              <Button variant="outlined" startIcon={<SendIcon />} onClick={onSendFile}>
+                Send file
+              </Button>
+            )}
+          </Stack>
+        )}
       </Box>
     );
   }
