@@ -1,6 +1,11 @@
+// INSTITUTION accounts are the original file-transfer/slip-composing accounts;
+// BANK is the newer account type added by the bank_dashboard feature.
+export type UserType = "INSTITUTION" | "BANK";
+
 export interface User {
   userId: number;
   username: string;
+  userType: UserType;
 }
 
 export type TransferStatus = "SENT" | "DOWNLOADED";

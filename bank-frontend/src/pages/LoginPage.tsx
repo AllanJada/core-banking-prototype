@@ -17,6 +17,7 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import { login as loginRequest } from "../api/client";
 import cardLogo from "../assets/cardLogo.png";
 import { useAuth } from "../context/AuthContext";
+import AuthNavMenu from "../components/AuthNavMenu";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
 import SecurityHighlights from "../components/SecurityHighlights";
@@ -99,6 +100,10 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const user = await loginRequest(username.trim(), password);
+      if (user.userType !== "INSTITUTION") {
+        setError("This is not an institution account. Use the menu in the top-left corner to switch to Bank Login.");
+        return;
+      }
       login(user);
       navigate("/dashboard", { replace: true });
     } catch (err) {
@@ -110,6 +115,7 @@ export default function LoginPage() {
 
   return (
     <LoginBackground>
+      <AuthNavMenu targetLabel="Bank Login" targetPath="/bank-login" />
       <GlassCard
         frost="none"
         elevation={0}

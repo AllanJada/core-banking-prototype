@@ -76,3 +76,8 @@ pids
 
 # Optional eslint cache
 .eslintcache
+
+# Document files
+*.docx
+*.pdf
+*.txt

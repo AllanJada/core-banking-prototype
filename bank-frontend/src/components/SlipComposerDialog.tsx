@@ -148,9 +148,13 @@ export default function SlipComposerDialog({
     setError(null);
 
     listUsers()
-      .then((users) => setRecipients(users.filter((u) => u.userId !== currentUser.userId)))
+      .then((users) =>
+        setRecipients(
+          users.filter((u) => u.userId !== currentUser.userId && u.userType === currentUser.userType)
+        )
+      )
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
-  }, [open, currentUser.userId]);
+  }, [open, currentUser.userId, currentUser.userType]);
 
   // Computed, not typed in: the whole point is that nobody has to add these
   // up by hand to sanity-check the slip before sending it (Tesler's Law —
