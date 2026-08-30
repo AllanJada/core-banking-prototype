@@ -48,6 +48,30 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
+        <!--
+          Bearer-token (JWT) issuing/validation for the auth fix described in JwtService —
+          replaces the old model where the frontend just sent whatever userId/senderId it
+          liked and the backend trusted it outright. 0.13.0 is the latest stable jjwt release
+          as of this writing (mvnrepository.com, Aug 20 2025) — jjwt-impl/jjwt-jackson are
+          runtime-only since application code only touches the jjwt-api interfaces directly.
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.13.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.13.0</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.13.0</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-rest</artifactId>

@@ -36,8 +36,8 @@ export default function DashboardPage() {
 
   const refresh = useCallback(() => {
     if (!user) return;
-    getInbox(user.userId).then(setInbox).catch(() => setSnackbar("Failed to load inbox"));
-    getOutbox(user.userId).then(setOutbox).catch(() => setSnackbar("Failed to load outbox"));
+    getInbox().then(setInbox).catch(() => setSnackbar("Failed to load inbox"));
+    getOutbox().then(setOutbox).catch(() => setSnackbar("Failed to load outbox"));
   }, [user]);
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export default function DashboardPage() {
     if (!user) return;
     setDownloadingId(transfer.transferId);
     try {
-      await downloadFile(transfer.transferId, user.userId, transfer.originalFilename);
+      await downloadFile(transfer.transferId, transfer.originalFilename);
       refresh();
     } catch (err) {
       setSnackbar(err instanceof Error ? err.message : "Download failed");

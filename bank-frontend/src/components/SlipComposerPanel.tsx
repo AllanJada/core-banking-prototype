@@ -138,7 +138,6 @@ export default function SlipComposerPanel({ currentUser, onSent }: SlipComposerP
     setSubmitting(true);
     try {
       await sendSlip({
-        senderId: currentUser.userId,
         receiverId: form.receiverId,
         title: form.title,
         organizationName: form.organizationName,

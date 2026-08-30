@@ -7,6 +7,7 @@ import org.learning.mldsa.services.FileTransferService;
 import org.learning.mldsa.services.PdfGenerationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,13 +30,17 @@ public class SlipController {
     private final PdfGenerationService pdfGenerationService;
     private final FileTransferService fileTransferService;
 
+    // senderId is the authenticated caller's own id (see FileTransferController's comment on
+    // the same change) rather than a field on the request body — SlipRequest no longer has a
+    // senderId field at all, so there's nothing left for a client to spoof here either.
     @PostMapping("/send")
-    ResponseEntity<FileTransferResponse> generateAndSend(@RequestBody SlipRequest request) {
+    ResponseEntity<FileTransferResponse> generateAndSend(@RequestBody SlipRequest request,
+                                                           @AuthenticationPrincipal Long senderId) {
         byte[] pdfBytes = pdfGenerationService.generateSlipPdf(request);
 
         String filename = buildFilename(request);
         FileTransferResponse response = fileTransferService.sendGeneratedFile(
-                request.getSenderId(), request.getReceiverId(), pdfBytes, filename
+                senderId, request.getReceiverId(), pdfBytes, filename
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);

@@ -185,7 +185,6 @@ export default function SlipComposerDialog({
     setSubmitting(true);
     try {
       await sendSlip({
-        senderId: currentUser.userId,
         receiverId: form.receiverId,
         title: form.title,
         organizationName: form.organizationName,

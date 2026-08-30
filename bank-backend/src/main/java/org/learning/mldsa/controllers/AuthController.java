@@ -1,8 +1,8 @@
 package org.learning.mldsa.controllers;
 
 import lombok.RequiredArgsConstructor;
+import org.learning.mldsa.dtos.AuthResponse;
 import org.learning.mldsa.dtos.LoginRequest;
-import org.learning.mldsa.dtos.UserResponse;
 import org.learning.mldsa.services.AuthService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,8 +18,8 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/login")
-    ResponseEntity<UserResponse> login(@RequestBody LoginRequest request) {
-        UserResponse response = authService.login(request);
+    ResponseEntity<AuthResponse> login(@RequestBody LoginRequest request) {
+        AuthResponse response = authService.login(request);
         return ResponseEntity.ok(response);
     }
 }

@@ -9,7 +9,9 @@ import java.util.Objects;
 
 @Data
 public class SlipRequest {
-    private Long senderId;
+    // senderId was removed deliberately — the sender is now always the authenticated caller
+    // (see SlipController), never a value the client gets to state. receiverId stays: who to
+    // send *to* is a legitimate choice for the client to make, unlike who it's *from*.
     private Long receiverId;
 
     private String title;

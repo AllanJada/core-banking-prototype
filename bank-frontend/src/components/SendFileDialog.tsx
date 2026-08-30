@@ -77,7 +77,7 @@ export default function SendFileDialog({
     setError(null);
     setSubmitting(true);
     try {
-      await sendFile(currentUser.userId, receiverId, file);
+      await sendFile(receiverId, file);
       onSent();
       onClose();
     } catch (err) {

@@ -1,8 +1,8 @@
 package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
+import org.learning.mldsa.dtos.AuthResponse;
 import org.learning.mldsa.dtos.LoginRequest;
-import org.learning.mldsa.dtos.UserResponse;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.UserRepositories;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,8 +14,9 @@ public class AuthService {
 
     private final UserRepositories userRepositories;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
-    public UserResponse login(LoginRequest request) {
+    public AuthResponse login(LoginRequest request) {
         User user = userRepositories.findByName(request.getUsername())
                 .orElseThrow(() -> new RuntimeException("Invalid username or password"));
 
@@ -23,6 +24,7 @@ public class AuthService {
             throw new RuntimeException("Invalid username or password");
         }
 
-        return new UserResponse(user.getUserId(), user.getName(), user.getUserType());
+        String token = jwtService.issueToken(user);
+        return new AuthResponse(user.getUserId(), user.getName(), user.getUserType(), token);
     }
 }

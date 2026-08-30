@@ -1,5 +1,6 @@
 package org.learning.mldsa.services;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Cipher;
@@ -52,6 +53,95 @@ public class CryptoService {
     private static final int GCM_IV_LENGTH_BYTES = 12;
     private static final int GCM_TAG_LENGTH_BITS = 128;
 
+    // ---- Private-key encryption at rest ----
+    //
+    // Private keys (the ML-DSA signing key and the ML-KEM decryption key each institution
+    // gets at registration) are the one thing in this database that must never be readable
+    // by someone with only DB access — a backup, a leaked dump, an over-permissioned read
+    // replica. Before this, encodePrivateKey/encodeKemPrivateKey wrote the raw PKCS8 bytes
+    // straight to Base64: anyone with SELECT on `users` had every institution's signing and
+    // decryption keys in the clear, letting them forge signed transfers or read anything
+    // encrypted to that institution. See the earlier "how can this be solved" discussion.
+    //
+    // This wraps them in AES-256-GCM under a master key that lives outside this database (an
+    // env var here; a real KMS/HSM-backed secret is the recommended next step in production —
+    // see application.properties' "app.master-key" comment for why a literal env-var secret
+    // is the demo-scope compromise rather than full envelope encryption against a cloud KMS:
+    // AWS KMS supports native ML-DSA signing keys but not ML-KEM keys as of this writing, so
+    // a single KMS-only approach can't cover both key types cleanly yet).
+    //
+    // Ciphertext is tagged with an "enc:v1:" prefix — the same discriminator convention
+    // Jasypt's ENC(...) wrapper uses for encrypted Spring properties — so decodePrivateKey/
+    // decodeKemPrivateKey can tell a newly-encrypted value apart from an old plaintext row
+    // without a schema migration or a backfill script. Practically: anything registered from
+    // now on is encrypted; anything already sitting in an existing local Postgres database
+    // keeps decoding exactly as before, since it was never written with this prefix. No need
+    // to drop or re-register pre-existing demo accounts for this change alone.
+    private static final String ENC_PREFIX = "enc:v1:";
+
+    // The field initializer below (not application.properties' app.master-key default) is
+    // what's actually firing in your test failure. CryptoServiceTest and FileTransferServiceTest
+    // construct CryptoService directly (`new CryptoService()`, confirmed by the stack trace —
+    // no Spring context involved), so Spring's @Value field injection never runs, and the
+    // field would otherwise stay Java-null, NPEing the instant a test calls encodePrivateKey/
+    // encodeKemPrivateKey. When Spring DOES manage this bean — the real running app, and
+    // MldsaApplicationTests, which boots a full context and passed — field injection runs
+    // right after construction and unconditionally overwrites this with the real resolved
+    // property, so the default below is inert on every path except a bare `new CryptoService()`.
+    @Value("${app.master-key}")
+    private String masterKeySecret = "unit-test-fallback-key-not-used-when-spring-configures-this-field";
+
+    private SecretKeySpec masterKey() {
+        try {
+            // SHA-256 over the configured secret, not the raw bytes of the secret itself, so
+            // any length/format of APP_MASTER_KEY env var yields a valid 32-byte AES-256 key
+            // — a deliberately simple derivation, not a full password-hashing KDF (no
+            // per-install salt or iteration count), which is an acceptable trade for a
+            // secret that's meant to be a long random value from an env var rather than a
+            // human-chosen password. If this master key is ever suspected to have leaked,
+            // rotate it and re-register affected accounts — there's no re-encryption
+            // tooling here yet.
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(masterKeySecret.getBytes(StandardCharsets.UTF_8));
+            return new SecretKeySpec(digest, "AES");
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
+    }
+
+    private String encryptAtRest(byte[] plaintext) {
+        try {
+            byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
+            SecureRandom.getInstanceStrong().nextBytes(iv);
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, masterKey(), new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+            byte[] ciphertext = cipher.doFinal(plaintext);
+
+            byte[] out = new byte[iv.length + ciphertext.length];
+            System.arraycopy(iv, 0, out, 0, iv.length);
+            System.arraycopy(ciphertext, 0, out, iv.length, ciphertext.length);
+            return ENC_PREFIX + Base64.getEncoder().encodeToString(out);
+        } catch (GeneralSecurityException e) {
+            throw new RuntimeException("Failed to encrypt private key for storage", e);
+        }
+    }
+
+    private byte[] decryptAtRest(String stored) {
+        try {
+            byte[] ivAndCiphertext = Base64.getDecoder().decode(stored.substring(ENC_PREFIX.length()));
+            byte[] iv = Arrays.copyOfRange(ivAndCiphertext, 0, GCM_IV_LENGTH_BYTES);
+            byte[] ciphertext = Arrays.copyOfRange(ivAndCiphertext, GCM_IV_LENGTH_BYTES, ivAndCiphertext.length);
+
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, masterKey(), new GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv));
+            return cipher.doFinal(ciphertext);
+        } catch (GeneralSecurityException e) {
+            throw new RuntimeException(
+                    "Failed to decrypt stored private key — wrong master key, or the stored value was altered", e);
+        }
+    }
+
     // ---- ML-DSA-65 : signing ----
 
     public KeyPair generateMlDsaKeyPair() {
@@ -66,8 +156,9 @@ public class CryptoService {
         return Base64.getEncoder().encodeToString(publicKey.getEncoded());
     }
 
+    /** Encrypts the private key's PKCS8 bytes before storing — see the class-level comment above. */
     public String encodePrivateKey(PrivateKey privateKey) {
-        return Base64.getEncoder().encodeToString(privateKey.getEncoded());
+        return encryptAtRest(privateKey.getEncoded());
     }
 
     public PublicKey decodePublicKey(String base64) {
@@ -80,9 +171,10 @@ public class CryptoService {
         }
     }
 
-    public PrivateKey decodePrivateKey(String base64) {
+    /** Transparently handles both new (encrypted, "enc:v1:"-prefixed) and legacy plaintext rows. */
+    public PrivateKey decodePrivateKey(String stored) {
         try {
-            byte[] bytes = Base64.getDecoder().decode(base64);
+            byte[] bytes = stored.startsWith(ENC_PREFIX) ? decryptAtRest(stored) : Base64.getDecoder().decode(stored);
             KeyFactory factory = KeyFactory.getInstance(DSA_ALGORITHM);
             return factory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
@@ -156,8 +248,9 @@ public class CryptoService {
         return Base64.getEncoder().encodeToString(publicKey.getEncoded());
     }
 
+    /** Encrypts the private key's PKCS8 bytes before storing — see the class-level comment above. */
     public String encodeKemPrivateKey(PrivateKey privateKey) {
-        return Base64.getEncoder().encodeToString(privateKey.getEncoded());
+        return encryptAtRest(privateKey.getEncoded());
     }
 
     public PublicKey decodeKemPublicKey(String base64) {
@@ -170,9 +263,10 @@ public class CryptoService {
         }
     }
 
-    public PrivateKey decodeKemPrivateKey(String base64) {
+    /** Transparently handles both new (encrypted, "enc:v1:"-prefixed) and legacy plaintext rows. */
+    public PrivateKey decodeKemPrivateKey(String stored) {
         try {
-            byte[] bytes = Base64.getDecoder().decode(base64);
+            byte[] bytes = stored.startsWith(ENC_PREFIX) ? decryptAtRest(stored) : Base64.getDecoder().decode(stored);
             KeyFactory factory = KeyFactory.getInstance(KEM_ALGORITHM);
             return factory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
