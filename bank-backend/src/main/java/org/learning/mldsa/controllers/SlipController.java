@@ -2,6 +2,7 @@ package org.learning.mldsa.controllers;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.FileTransferResponse;
+import org.learning.mldsa.dtos.SlipLineItem;
 import org.learning.mldsa.dtos.SlipRequest;
 import org.learning.mldsa.services.FileTransferService;
 import org.learning.mldsa.services.PdfGenerationService;
@@ -12,6 +13,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * Generates a payslip PDF from structured field data and sends it in a single request.
@@ -39,8 +44,13 @@ public class SlipController {
         byte[] pdfBytes = pdfGenerationService.generateSlipPdf(request);
 
         String filename = buildFilename(request);
+        // Passing the slip's own earnings/deductions through lets FileTransferService attach
+        // a zero-knowledge compliance proof of the net pay automatically -- see
+        // FileTransferService#attachComplianceProof. Best-effort: this send succeeds the same
+        // way whether or not that proof generation succeeds.
         FileTransferResponse response = fileTransferService.sendGeneratedFile(
-                senderId, request.getReceiverId(), pdfBytes, filename
+                senderId, request.getReceiverId(), pdfBytes, filename,
+                extractAmounts(request.getEarnings()), extractAmounts(request.getDeductions())
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
@@ -54,5 +64,19 @@ public class SlipController {
         // disk is always a server-generated UUID regardless (see FileStorageService).
         String safe = base.replaceAll("[^a-zA-Z0-9 _-]", "").trim();
         return (safe.isEmpty() ? "Slip" : safe) + ".pdf";
+    }
+
+    // Mirrors SlipRequest.sum()'s own null-filtering. Returns an empty (never null) list for
+    // a null items list, distinct from the null earnings/deductions that FileTransferService
+    // treats as "not a payslip, skip proof generation" -- a payslip with a genuinely empty
+    // earnings or deductions section should still get a proof attempted, not skipped.
+    private List<BigDecimal> extractAmounts(List<SlipLineItem> items) {
+        if (items == null) {
+            return List.of();
+        }
+        return items.stream()
+                .map(SlipLineItem::getAmount)
+                .filter(Objects::nonNull)
+                .toList();
     }
 }

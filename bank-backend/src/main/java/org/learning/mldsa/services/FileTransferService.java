@@ -1,6 +1,8 @@
 package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.learning.mldsa.dtos.ComplianceProveResponse;
 import org.learning.mldsa.dtos.FileTransferResponse;
 import org.learning.mldsa.models.FileTransfer;
 import org.learning.mldsa.models.TransferStatus;
@@ -13,12 +15,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
+@Slf4j
 @RequiredArgsConstructor
 @Service
 public class FileTransferService {
@@ -27,6 +34,7 @@ public class FileTransferService {
     private final UserRepositories userRepositories;
     private final FileStorageService fileStorageService;
     private final CryptoService cryptoService;
+    private final ZkComplianceService zkComplianceService;
 
     public FileTransferResponse sendFile(Long senderId, Long receiverId, MultipartFile file) {
         byte[] fileBytes;
@@ -35,12 +43,14 @@ public class FileTransferService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to read uploaded file", e);
         }
-        return signEncryptAndPersist(senderId, receiverId, fileBytes, file.getOriginalFilename());
+        // null earnings/deductions: raw uploads never carry payslip line items, so they
+        // opt out of compliance-proof generation entirely (see attachComplianceProof).
+        return signEncryptAndPersist(senderId, receiverId, fileBytes, file.getOriginalFilename(), null, null);
     }
 
-    public FileTransferResponse sendGeneratedFile(Long senderId, Long receiverId,
-                                                   byte[] fileBytes, String filename) {
-        return signEncryptAndPersist(senderId, receiverId, fileBytes, filename);
+    public FileTransferResponse sendGeneratedFile(Long senderId, Long receiverId, byte[] fileBytes, String filename,
+                                                   List<BigDecimal> earnings, List<BigDecimal> deductions) {
+        return signEncryptAndPersist(senderId, receiverId, fileBytes, filename, earnings, deductions);
     }
 
     /**
@@ -48,9 +58,15 @@ public class FileTransferService {
      *  1. Hash + sign the PLAINTEXT (unchanged from before ML-KEM was added).
      *  2. Encapsulate a fresh secret against the RECEIVER's ML-KEM public key and use it
      *     to AES-256-GCM-encrypt the plaintext — stored instead of the plaintext.
+     *
+     * earnings/deductions are non-null only for payslip sends (see sendGeneratedFile); when
+     * present, a compliance proof is attached best-effort (attachComplianceProof) before the
+     * transfer is saved. Passing null for both (as sendFile does) skips proof generation
+     * entirely rather than attempting one against an empty payslip.
      */
     private FileTransferResponse signEncryptAndPersist(Long senderId, Long receiverId, byte[] fileBytes,
-                                                         String originalFilename) {
+                                                         String originalFilename,
+                                                         List<BigDecimal> earnings, List<BigDecimal> deductions) {
         if (senderId.equals(receiverId)) {
             throw new RuntimeException("Sender and receiver must be different users");
         }
@@ -97,8 +113,44 @@ public class FileTransferService {
         transfer.setSentAt(sentAt);
         transfer.setKemCiphertext(Base64.getEncoder().encodeToString(encapsulation.kemCiphertext()));
 
+        attachComplianceProof(transfer, earnings, deductions);
+
         FileTransfer saved = fileTransferRepository.save(transfer);
         return toResponse(saved);
+    }
+
+    /**
+     * Best-effort: requests a ZK compliance proof for a payslip's net pay from the standalone
+     * zk-compliance-service and attaches it to the transfer being built. Never throws:
+     * generation is skipped silently (transfer.complianceProof stays null) if earnings or
+     * deductions is null (see signEncryptAndPersist), if any amount can't be represented
+     * exactly in cents, or if the Rust proof service is unreachable, times out, or errors.
+     * A payslip send must never be blocked or failed by this.
+     */
+    private void attachComplianceProof(FileTransfer transfer, List<BigDecimal> earnings, List<BigDecimal> deductions) {
+        if (earnings == null || deductions == null) {
+            return;
+        }
+        try {
+            List<Long> earningsCents = toCents(earnings);
+            List<Long> deductionsCents = toCents(deductions);
+            ZkComplianceService.ProveResult result = zkComplianceService.prove(earningsCents, deductionsCents);
+            transfer.setComplianceProof(result.proofBase64);
+            transfer.setComplianceNetPayCents(result.netPayCents);
+            transfer.setComplianceNumEntries(result.numEntries);
+            transfer.setComplianceProofSizeBytes(result.proofSizeBytes);
+        } catch (RuntimeException e) {
+            log.warn("Compliance proof generation failed; sending payslip without a proof: {}", e.getMessage());
+        }
+    }
+
+    // Mirrors SlipRequest.sum()'s null-filtering so a blank line-item amount is silently
+    // skipped here exactly as it already is when the slip's own displayed totals are computed.
+    private List<Long> toCents(List<BigDecimal> amounts) {
+        return amounts.stream()
+                .filter(Objects::nonNull)
+                .map(amount -> amount.multiply(BigDecimal.valueOf(100)).setScale(0, RoundingMode.HALF_UP).longValueExact())
+                .toList();
     }
 
     public List<FileTransferResponse> getInbox(Long userId) {
@@ -113,6 +165,26 @@ public class FileTransferService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    /**
+     * Returns the compliance proof attached to a transfer, if one was generated for it.
+     * Scoped to the sender or receiver only, and empty (never an error) both when the caller
+     * isn't one of those two and when the transfer simply has no proof attached: mirrors
+     * downloadFile's "File not found, or you are not the recipient" pattern of not revealing
+     * to an unauthorized caller whether the transfer even exists.
+     */
+    public Optional<ComplianceProveResponse> getComplianceProof(Long transferId, Long callerId) {
+        return fileTransferRepository.findById(transferId)
+                .filter(transfer -> transfer.getSender().getUserId().equals(callerId)
+                        || transfer.getReceiver().getUserId().equals(callerId))
+                .filter(transfer -> transfer.getComplianceProof() != null)
+                .map(transfer -> new ComplianceProveResponse(
+                        transfer.getComplianceNetPayCents(),
+                        transfer.getComplianceNumEntries(),
+                        transfer.getComplianceProof(),
+                        transfer.getComplianceProofSizeBytes()
+                ));
     }
 
     /**
@@ -219,7 +291,8 @@ public class FileTransferService {
                 transfer.getDownloadedAt(),
                 transfer.getFileHash(),
                 transfer.getSignature(),
-                transfer.getSignatureValid()
+                transfer.getSignatureValid(),
+                transfer.getComplianceProof() != null
         );
     }
 }

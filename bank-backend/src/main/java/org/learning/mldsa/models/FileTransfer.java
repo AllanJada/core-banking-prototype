@@ -59,4 +59,22 @@ public class FileTransfer {
     // recover the AES-256-GCM key that decrypts storedFilename's contents.
     @Column(name = "kem_ciphertext", columnDefinition = "TEXT")
     private String kemCiphertext;
+
+    // Zero-knowledge STARK proof (from the standalone zk-compliance-service) that this
+    // payslip's net pay was computed correctly from its earnings/deductions, without
+    // revealing the individual line items. Attached best-effort at send time for payslip
+    // sends only (see FileTransferService#attachComplianceProof) — always null for raw
+    // file uploads, and still null for a payslip send if the proof service was unreachable
+    // or errored, since a send must never be blocked or failed by proof generation.
+    @Column(name = "compliance_proof", columnDefinition = "TEXT")
+    private String complianceProof;
+
+    @Column(name = "compliance_net_pay_cents")
+    private Long complianceNetPayCents;
+
+    @Column(name = "compliance_num_entries")
+    private Integer complianceNumEntries;
+
+    @Column(name = "compliance_proof_size_bytes")
+    private Integer complianceProofSizeBytes;
 }

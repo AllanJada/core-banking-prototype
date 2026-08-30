@@ -22,4 +22,8 @@ public class FileTransferResponse {
     private String fileHash;
     private String signature;
     private Boolean signatureValid;
+    // True when a zero-knowledge compliance proof of this payslip's net pay was attached at
+    // send time; fetch it via GET /api/v1/compliance/proof/{transferId}. Always false for
+    // raw file uploads, which never attempt proof generation.
+    private Boolean complianceProofAvailable;
 }

@@ -5,26 +5,26 @@ import org.learning.mldsa.dtos.ComplianceProveRequest;
 import org.learning.mldsa.dtos.ComplianceProveResponse;
 import org.learning.mldsa.dtos.ComplianceVerifyRequest;
 import org.learning.mldsa.dtos.ComplianceVerifyResponse;
+import org.learning.mldsa.services.FileTransferService;
 import org.learning.mldsa.services.ZkComplianceService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
- * Standalone prototype endpoints for the zero-knowledge compliance-proof capability
- * (backed by the separate Rust service in zk-compliance-service/, run with
- * `cargo run --release`, default port 7878).
+ * Endpoints for the zero-knowledge compliance-proof capability (backed by the separate Rust
+ * service in zk-compliance-service/, run with `cargo run --release`, default port 7878).
  *
- * NOT WIRED INTO THE BANKING SYSTEM: nothing here is called by SlipController,
- * FileTransferService, or any other part of the existing payslip / file-transfer flow, and
- * this controller does not read or write FileTransfer records. It exists purely so the
- * capability can be exercised and reviewed through its own endpoints -- POST a set of
- * earnings/deductions, get back a proof; POST a proof back, get back a yes/no -- before any
- * decision is made about attaching it to a real transfer. Wiring it into SlipController
- * (e.g. proving a payslip's net pay at send time and storing the proof alongside the
- * FileTransfer record) is a small, separate follow-up once this is reviewed.
+ * WIRED IN: every payslip sent through SlipController now gets a compliance proof attached
+ * automatically -- see FileTransferService#attachComplianceProof, called from
+ * signEncryptAndPersist. That happens entirely server-side with no request here; /prove and
+ * /verify below remain standalone endpoints for exercising the capability directly (proving
+ * an arbitrary set of earnings/deductions, or verifying a proof, without any FileTransfer
+ * involved), and /proof/{transferId} is the read path for a proof that was already attached
+ * to a real transfer at send time.
  *
  * Demonstrates: proving a computed total (net pay = earnings - deductions) is correct
  * without revealing the individual line items that produced it -- only the total, the
@@ -36,6 +36,7 @@ import java.util.Map;
 public class ComplianceController {
 
     private final ZkComplianceService zkComplianceService;
+    private final FileTransferService fileTransferService;
 
     @GetMapping("/health")
     ResponseEntity<?> health() {
@@ -65,5 +66,14 @@ public class ComplianceController {
         } catch (ZkComplianceService.ZkServiceException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // Scoped to sender-or-receiver inside the service layer, not the controller -- same
+    // Controller-Service-Repository layering as every other endpoint in this codebase.
+    @GetMapping("/proof/{transferId}")
+    ResponseEntity<?> getProof(@PathVariable Long transferId, @AuthenticationPrincipal Long callerId) {
+        return fileTransferService.getComplianceProof(transferId, callerId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 }
