@@ -18,6 +18,7 @@ import { useAuth } from "../context/AuthContext";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
 import AuthNavMenu from "../components/AuthNavMenu";
+import cardLogo from "../assets/cardLogo.png";
 
 const glassInputSx = {
   "& .MuiOutlinedInput-root": {
@@ -78,18 +79,17 @@ export default function BankLoginPage() {
         <Stack spacing={2.5}>
           <Stack spacing={1} sx={{ alignItems: "center", textAlign: "center" }}>
             <Box
+                component="img"
+                src={cardLogo}
+                alt="Bank of Tanzania logo"
               sx={{
-                width: 56,
-                height: 56,
+                width: "50%",
                 borderRadius: "50%",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(255,255,255,0.12)",
-                border: "1px solid rgba(255,255,255,0.2)",
               }}
             >
-              <AccountBalanceOutlinedIcon sx={{ color: "#fff", fontSize: 28 }} />
             </Box>
             <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx }}>
               Bank Login
