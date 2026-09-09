@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -20,7 +20,7 @@ import { useAuth } from "../context/AuthContext";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
 import SecurityHighlights from "../components/SecurityHighlights";
-import AuthNavMenu from "../components/AuthNavMenu";
+import { dashboardPathFor } from "../routes";
 
 // Translucent styling for inputs sitting on the glass panel.
 const glassInputSx = {
@@ -62,19 +62,22 @@ export default function LoginPage() {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const user = await loginRequest(username.trim(), password);
-      if (user.userType !== "INSTITUTION") {
-        setError("This is a bank account. Use the menu in the top-left corner to switch to Bank Login.");
-        return;
-      }
-      login(user);
-      navigate("/dashboard", { replace: true });
+      // One sign-in for every role. The account's role decides where it lands, rather
+      // than the page it started from deciding which accounts are welcome — which is
+      // what the separate Bank Login screen used to do.
+      const session = await loginRequest(username.trim(), password);
+      login(session);
+      // Resume whatever they were trying to reach, if a guard sent them here; otherwise
+      // their own dashboard. A wrong-role destination is bounced onward by the guard.
+      const from = (location.state as { from?: string } | null)?.from;
+      navigate(from ?? dashboardPathFor(session.user.role), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -84,7 +87,6 @@ export default function LoginPage() {
 
   return (
     <LoginBackground>
-      <AuthNavMenu targetLabel="Bank Login" targetPath="/bank-login" />
       <GlassCard
         frost="none"
         elevation={0}
@@ -162,7 +164,7 @@ export default function LoginPage() {
                 Sign in
               </Typography>
               <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.65)", ...textShadowSx }}>
-                Use your institution account
+                Use your account credentials
               </Typography>
             </Box>
 

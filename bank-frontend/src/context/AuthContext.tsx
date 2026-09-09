@@ -1,35 +1,65 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { User } from "../types";
-
-const STORAGE_KEY = "bank-demo-user";
+import { getCurrentUser } from "../api/client";
+import { clearSession, loadSession, saveSession } from "../api/session";
+import type { AuthSession, User } from "../types";
 
 interface AuthContextValue {
   user: User | null;
-  login: (user: User) => void;
+  /** False until the stored token has been re-checked against the backend on startup. */
+  initializing: boolean;
+  login: (session: AuthSession) => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? (JSON.parse(stored) as User) : null;
-  });
+  const [user, setUser] = useState<User | null>(() => loadSession()?.user ?? null);
+  const [initializing, setInitializing] = useState(true);
 
+  // A token restored from storage may have expired while the tab was closed. Ask the
+  // backend once on startup rather than trusting what's in localStorage: it's the only
+  // way to tell a still-valid session from a stale one, and it means an expired token
+  // signs the user out at the login screen instead of failing mid-dashboard.
   useEffect(() => {
-    if (user) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
+    if (!loadSession()) {
+      setInitializing(false);
+      return;
     }
-  }, [user]);
 
-  const login = (loggedInUser: User) => setUser(loggedInUser);
-  const logout = () => setUser(null);
+    let cancelled = false;
+    getCurrentUser()
+      .then((currentUser) => {
+        if (!cancelled) setUser(currentUser);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        clearSession();
+        setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInitializing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const login = (session: AuthSession) => {
+    saveSession(session);
+    setUser(session.user);
+  };
+
+  const logout = () => {
+    clearSession();
+    setUser(null);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, initializing, login, logout }}>
+      {children}
+    </AuthContext.Provider>
   );
 }
 

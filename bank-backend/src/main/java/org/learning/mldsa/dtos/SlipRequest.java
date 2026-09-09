@@ -9,12 +9,17 @@ import java.util.Objects;
 
 @Data
 public class SlipRequest {
-    private Long senderId;
+    // No senderId: the sender is whoever the request's token says it is, taken from the
+    // authentication principal in SlipController. A slip that named its own sender would
+    // let any caller compose one "from" another institution.
     private Long receiverId;
 
     private String title;
     private String organizationName;
-    private String organizationAddress;
+
+    // Structured rather than a free-text line, because this becomes the debtor's PstlAdr in
+    // the ISO 20022 payload and that requires discrete components. See PostalAddress.
+    private PostalAddress organizationAddress;
 
     private LocalDate date;
     private String employeeName;

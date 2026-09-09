@@ -55,7 +55,8 @@
     <div class="logo-placeholder"></div>
     <h1 th:text="${slip.title}">Payslip</h1>
     <div class="org" th:text="${slip.organizationName}">Organization Name</div>
-    <div class="org" th:text="${slip.organizationAddress}">Organization Address</div>
+    <!-- The address is stored as discrete components; joined here purely for display. -->
+    <div class="org" th:text="${slip.organizationAddress != null} ? ${slip.organizationAddress.toDisplayLine()} : ''">Organization Address</div>
   </div>
 
   <table class="info">

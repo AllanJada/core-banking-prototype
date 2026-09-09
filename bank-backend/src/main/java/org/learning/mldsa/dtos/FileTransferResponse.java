@@ -22,4 +22,15 @@ public class FileTransferResponse {
     private String fileHash;
     private String signature;
     private Boolean signatureValid;
+
+    /** The transfer's end-to-end reference; null for transfers predating it. */
+    private String uetr;
+
+    /**
+     * Whether an ISO 20022 payload accompanies the document.
+     *
+     * A boolean rather than the payload's hash: the client only needs to know whether there
+     * is one to offer, and the hash is an integrity value the server checks itself.
+     */
+    private boolean hasPayload;
 }

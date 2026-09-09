@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.learning.mldsa.models.UserType;
+import org.learning.mldsa.models.Role;
 
 
 @Getter
@@ -14,5 +14,5 @@ import org.learning.mldsa.models.UserType;
 public class UserResponse {
     private Long userId;
     private String username;
-    private UserType userType;
+    private Role role;
 }

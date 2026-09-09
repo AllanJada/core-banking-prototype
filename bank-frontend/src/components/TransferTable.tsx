@@ -7,9 +7,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Stack,
   Typography,
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import CodeIcon from "@mui/icons-material/CodeOutlined";
 import type { FileTransfer } from "../types";
 import StatusChip from "./StatusChip";
 import SignatureChip from "./SignatureChip";
@@ -19,6 +21,7 @@ interface TransferTableProps {
   mode: "inbox" | "outbox";
   transfers: FileTransfer[];
   onDownload?: (transfer: FileTransfer) => void;
+  onDownloadPayload?: (transfer: FileTransfer) => void;
   downloadingId?: number | null;
 }
 
@@ -31,6 +34,7 @@ export default function TransferTable({
   mode,
   transfers,
   onDownload,
+  onDownloadPayload,
   downloadingId,
 }: TransferTableProps) {
   if (transfers.length === 0) {
@@ -47,7 +51,7 @@ export default function TransferTable({
 
   return (
     <TableContainer>
-      <Table size="small">
+      <Table size="small" sx={{ minWidth: 640 }}>
         <TableHead>
           <TableRow>
             <TableCell>{mode === "inbox" ? "From" : "To"}</TableCell>
@@ -79,15 +83,29 @@ export default function TransferTable({
               </TableCell>
               {mode === "inbox" && (
                 <TableCell align="right">
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    disabled={downloadingId === transfer.transferId}
-                    onClick={() => onDownload?.(transfer)}
-                  >
-                    {downloadingId === transfer.transferId ? "Downloading…" : "Download"}
-                  </Button>
+                  <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<DownloadIcon />}
+                      disabled={downloadingId === transfer.transferId}
+                      onClick={() => onDownload?.(transfer)}
+                    >
+                      {downloadingId === transfer.transferId ? "Downloading…" : "Download"}
+                    </Button>
+                    {/* Only for transfers that carry one — a plain file has no payment
+                        instruction to express, so there is nothing to offer. */}
+                    {transfer.hasPayload && (
+                      <Button
+                        size="small"
+                        startIcon={<CodeIcon />}
+                        onClick={() => onDownloadPayload?.(transfer)}
+                        title="ISO 20022 pain.001 payment instruction"
+                      >
+                        XML
+                      </Button>
+                    )}
+                  </Stack>
                 </TableCell>
               )}
               {mode === "outbox" && (

@@ -12,11 +12,11 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/AddOutlined";
 import DeleteIcon from "@mui/icons-material/DeleteOutlined";
-import { listUsers, sendSlip } from "../api/client";
+import { listCounterparties, sendSlip } from "../api/client";
+import AddressFields from "./AddressFields";
 import type { SlipLineItem, User } from "../types";
 
 interface SlipComposerPanelProps {
-  currentUser: User;
   onSent: () => void;
 }
 
@@ -33,7 +33,13 @@ function emptyForm() {
     receiverId: "" as number | "",
     title: "Payslip",
     organizationName: "",
-    organizationAddress: "",
+    // Address components, flat here and assembled into a nested PostalAddress on submit —
+    // the form's setField machinery is keyed on a flat shape.
+    streetName: "",
+    buildingNumber: "",
+    postCode: "",
+    townName: "",
+    country: "",
     date: todayIsoDate(),
     employeeName: "",
     payPeriod: "",
@@ -107,7 +113,7 @@ function LineItemEditor({
   );
 }
 
-export default function SlipComposerPanel({ currentUser, onSent }: SlipComposerPanelProps) {
+export default function SlipComposerPanel({ onSent }: SlipComposerPanelProps) {
   const [recipients, setRecipients] = useState<User[]>([]);
   const [form, setForm] = useState(emptyForm());
   const [earnings, setEarnings] = useState<SlipLineItem[]>([emptyLineItem()]);
@@ -116,14 +122,12 @@ export default function SlipComposerPanel({ currentUser, onSent }: SlipComposerP
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    listUsers()
-      .then((users) =>
-        setRecipients(
-          users.filter((u) => u.userId !== currentUser.userId && u.userType === currentUser.userType)
-        )
-      )
+    // The backend decides who counts as a valid recipient and enforces the same rule
+    // when the slip is sent, so there's nothing left to filter here.
+    listCounterparties()
+      .then(setRecipients)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
-  }, [currentUser.userId, currentUser.userType]);
+  }, []);
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(
     key: K,
@@ -152,11 +156,16 @@ export default function SlipComposerPanel({ currentUser, onSent }: SlipComposerP
     setSubmitting(true);
     try {
       await sendSlip({
-        senderId: currentUser.userId,
         receiverId: form.receiverId,
         title: form.title,
         organizationName: form.organizationName,
-        organizationAddress: form.organizationAddress,
+        organizationAddress: {
+          streetName: form.streetName,
+          buildingNumber: form.buildingNumber,
+          postCode: form.postCode,
+          townName: form.townName,
+          country: form.country,
+        },
         date: form.date,
         employeeName: form.employeeName,
         payPeriod: form.payPeriod,
@@ -223,13 +232,17 @@ export default function SlipComposerPanel({ currentUser, onSent }: SlipComposerP
             onChange={(e) => setField("organizationName", e.target.value)}
             fullWidth
           />
-          <TextField
-            label="Organization address"
-            value={form.organizationAddress}
-            onChange={(e) => setField("organizationAddress", e.target.value)}
-            fullWidth
-          />
         </Stack>
+        <AddressFields
+          values={{
+            streetName: form.streetName,
+            buildingNumber: form.buildingNumber,
+            postCode: form.postCode,
+            townName: form.townName,
+            country: form.country,
+          }}
+          onChange={setField}
+        />
 
         <Divider />
         <Typography variant="subtitle2">Employee</Typography>

@@ -1,9 +1,137 @@
-export type UserType = "INSTITUTION" | "BANK";
+export type Role = "NORMAL_USER" | "INSTITUTION" | "BANK";
 
 export interface User {
   userId: number;
   username: string;
-  userType: UserType;
+  role: Role;
+}
+
+/** A signed-in session: who you are, plus the bearer token proving it to the API. */
+export interface AuthSession {
+  token: string;
+  user: User;
+}
+
+export interface Account {
+  accountNumber: string;
+  currency: string;
+  /** Derived from the account's postings on each request, never a stored counter. */
+  balance: number;
+  openedAt: string;
+}
+
+export type PostingDirection = "CREDIT" | "DEBIT";
+
+export interface Posting {
+  postingId: number;
+  direction: PostingDirection;
+  /** Always positive — direction decides whether it raised or lowered the balance. */
+  amount: number;
+  description: string | null;
+  transactionRef: string;
+  postedAt: string;
+}
+
+/**
+ * One page of results, matching the backend's PageResponse.
+ *
+ * Every list endpoint returns this shape, so a caller never receives an unbounded array
+ * even when it asks for no particular page.
+ */
+export interface Page<T> {
+  content: T[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+}
+
+/** An account as the Bank role sees it — with its owner, and no secrets. */
+export interface AdminAccount {
+  accountId: number;
+  accountNumber: string;
+  ownerUsername: string;
+  currency: string;
+  balance: number;
+  openedAt: string;
+  cardStatus: CardStatus | null;
+  /** Masked to the last four digits, or null when no card is issued. */
+  cardNumber: string | null;
+}
+
+export interface AdminSummary {
+  customers: number;
+  institutions: number;
+  bankOperators: number;
+  accounts: number;
+  /** Sum of every account balance — what the ledger says the platform holds. */
+  totalHeld: number;
+  currency: string;
+  completedPayments: number;
+  failedPayments: number;
+  completedPaymentVolume: number;
+  fileTransfers: number;
+  transfersWithPayload: number;
+}
+
+export type PaymentStatus = "COMPLETED" | "FAILED";
+
+export interface Payment {
+  paymentId: number;
+  fromAccountNumber: string;
+  /** Null when the payment was refused because no such recipient existed. */
+  toAccountNumber: string | null;
+  amount: number;
+  description: string | null;
+  status: PaymentStatus;
+  /** Set only on a refused payment, explaining why. */
+  failureReason: string | null;
+  transactionRef: string | null;
+  createdAt: string;
+}
+
+export type CardStatus = "ACTIVE" | "BLOCKED" | "EXPIRED";
+
+export interface DebitCard {
+  /** Masked everywhere except in the response to issuing the card. */
+  cardNumber: string;
+  accountNumber: string;
+  expiresOn: string;
+  /** Derived server-side: a card past its date reports EXPIRED. */
+  status: CardStatus;
+}
+
+export type PaymentLinkStatus = "PENDING" | "PAID" | "CANCELLED" | "EXPIRED";
+
+export interface PaymentLink {
+  linkId: string;
+  /** The account that gets paid — shown to whoever is deciding whether to pay. */
+  requesterAccountNumber: string;
+  amount: number;
+  description: string | null;
+  /** Derived server-side: a link past its deadline reports EXPIRED, not PENDING. */
+  status: PaymentLinkStatus;
+  expiresAt: string;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface PaymentLinkRequest {
+  amount: number;
+  description: string;
+  expiresInHours?: number;
+}
+
+export interface DepositRequest {
+  amount: number;
+  description: string;
+}
+
+export interface PaymentRequest {
+  toAccountNumber: string;
+  amount: number;
+  description: string;
 }
 
 export type TransferStatus = "SENT" | "DOWNLOADED";
@@ -16,11 +144,13 @@ export interface FileTransfer {
   status: TransferStatus;
   sentAt: string;
   downloadedAt: string | null;
-  // Present now that the backend signs every transfer, but not yet shown anywhere
-  // in the UI — typed here for accuracy, not currently rendered.
   fileHash?: string;
   signature?: string;
   signatureValid?: boolean;
+  /** End-to-end reference; absent on transfers predating it. */
+  uetr?: string;
+  /** Whether an ISO 20022 pain.001 payload accompanies the document. */
+  hasPayload?: boolean;
 }
 
 export interface SlipLineItem {
@@ -28,12 +158,29 @@ export interface SlipLineItem {
   amount: number;
 }
 
+/**
+ * A postal address in discrete parts, mirroring ISO 20022's PstlAdr.
+ *
+ * Structured rather than one free-text line because the standard requires the components
+ * separately, and splitting a typed-in line back apart afterwards is guesswork. Town and
+ * country are the minimum the payment schemes accept.
+ */
+export interface PostalAddress {
+  streetName: string;
+  buildingNumber: string;
+  postCode: string;
+  townName: string;
+  /** Two-letter ISO 3166-1 alpha-2 code, not a country name. */
+  country: string;
+}
+
 export interface SlipRequest {
-  senderId: number;
+  // No senderId — the backend takes the sender from the request's token, so a client
+  // cannot compose a slip on another institution's behalf.
   receiverId: number;
   title: string;
   organizationName: string;
-  organizationAddress: string;
+  organizationAddress: PostalAddress;
   date: string; // yyyy-MM-dd, matches a plain <input type="date"> value directly
   employeeName: string;
   payPeriod: string;
