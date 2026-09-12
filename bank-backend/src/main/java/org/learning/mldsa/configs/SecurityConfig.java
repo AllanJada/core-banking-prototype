@@ -46,13 +46,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Anonymous by necessity — you cannot hold a token before logging in.
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
-                        // Reachable without a token, but no longer open: UserService decides
-                        // who may actually provision an account, and allows an anonymous
-                        // caller only while no Bank account exists yet. That check has to
-                        // live there rather than here because it depends on the database's
-                        // state, not on the request. Once a Bank account exists this route
-                        // answers 403 to everyone but that role.
+                        // Bootstrap: reachable without a token, but it creates only the first
+                        // Central Bank overseer, and only while none exists. UserService makes
+                        // that decision because it depends on the database's state, not on the
+                        // request. Once an overseer exists this route refuses everyone.
                         .requestMatchers(HttpMethod.POST, "/api/v1/users").permitAll()
+                        // Lets the sign-in screen know whether to offer first-time setup.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users/bootstrap").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationErrorHandler)

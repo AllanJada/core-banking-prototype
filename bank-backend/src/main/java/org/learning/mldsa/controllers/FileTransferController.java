@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.FileTransferResponse;
 import org.learning.mldsa.dtos.PageResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
+import org.learning.mldsa.dtos.PaymentPreviewResponse;
+import org.learning.mldsa.dtos.RejectTransferRequest;
 import org.learning.mldsa.security.AuthenticatedUser;
 import org.learning.mldsa.services.FileDownload;
 import org.learning.mldsa.services.FileTransferService;
@@ -72,6 +74,56 @@ public class FileTransferController {
             @AuthenticationPrincipal AuthenticatedUser user
     ) {
         return ResponseEntity.ok(fileTransferService.getOutbox(user.userId(), PageRequestParams.of(page, size)));
+    }
+
+    /**
+     * The review step: structured key fields for a recipient deciding whether to approve or
+     * reject, re-verified against the stored bytes on every call rather than a cached
+     * verdict from send time. Never throws on a failed check — a transfer that no longer
+     * verifies is exactly the case a reviewer needs to see, not a 400 that hides it.
+     */
+    @GetMapping("/{transferId}/preview")
+    ResponseEntity<PaymentPreviewResponse> preview(
+            @PathVariable Long transferId,
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        return ResponseEntity.ok(fileTransferService.preview(transferId, user.userId()));
+    }
+
+    /**
+     * The document itself, rendered inline for review rather than saved as an attachment.
+     * Available at any status, including after a decision has been made, so a recipient can
+     * re-open what they already approved or rejected.
+     */
+    @GetMapping("/{transferId}/preview/document")
+    ResponseEntity<Resource> previewDocument(
+            @PathVariable Long transferId,
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        FileDownload preview = fileTransferService.previewDocument(transferId, user.userId());
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + preview.originalFilename() + "\"")
+                .body(preview.resource());
+    }
+
+    /** Accepts a transfer, the decision that makes it downloadable. */
+    @PostMapping("/{transferId}/approve")
+    ResponseEntity<FileTransferResponse> approve(
+            @PathVariable Long transferId,
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        return ResponseEntity.ok(fileTransferService.approve(transferId, user.userId()));
+    }
+
+    /** Refuses a transfer. Terminal, and requires a reason. */
+    @PostMapping("/{transferId}/reject")
+    ResponseEntity<FileTransferResponse> reject(
+            @PathVariable Long transferId,
+            @RequestBody RejectTransferRequest request,
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        return ResponseEntity.ok(fileTransferService.reject(transferId, user.userId(), request.getReason()));
     }
 
     /**

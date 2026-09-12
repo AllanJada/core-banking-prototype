@@ -190,6 +190,12 @@ export default function AccountPage() {
         <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
           <Stack spacing={0.5}>
             <Typography variant="body2" color="text.secondary">
+              Your bank
+            </Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+              {account ? `${account.institutionName} (${account.institutionCode})` : "—"}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ pt: 1.5 }}>
               Account number
             </Typography>
             <Typography variant="h6" sx={{ fontWeight: 600, letterSpacing: 1 }}>

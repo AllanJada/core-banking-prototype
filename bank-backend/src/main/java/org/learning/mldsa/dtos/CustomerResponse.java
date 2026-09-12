@@ -10,22 +10,19 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
- * An account as the Bank role sees it: the customer, the balance, and whether a card is
- * attached.
+ * A customer as their own institution sees them.
  *
- * Distinct from the customer's own AccountResponse because this view answers a different
- * question — who holds this account — and so carries the owner. It still carries no key
- * material, no PIN, and no full card number: an oversight role needs to see that an account
- * exists and what it holds, not the secrets belonging to it.
+ * Only ever built for a customer the calling institution holds — see InstitutionService.
+ * Like the rest of the system it carries no key material, no PIN and no full card number.
  */
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class AdminAccountResponse {
-    private Long accountId;
+public class CustomerResponse {
+    private Long userId;
+    private String username;
     private String accountNumber;
-    private String ownerUsername;
     private String currency;
     private BigDecimal balance;
     private Instant openedAt;

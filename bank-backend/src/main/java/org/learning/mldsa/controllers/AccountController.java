@@ -7,6 +7,7 @@ import org.learning.mldsa.dtos.PageRequestParams;
 import org.learning.mldsa.dtos.PostingResponse;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.Posting;
+import org.learning.mldsa.models.User;
 import org.learning.mldsa.security.AuthenticatedUser;
 import org.learning.mldsa.services.AccountService;
 import org.learning.mldsa.services.StatementService;
@@ -44,11 +45,14 @@ public class AccountController {
     @GetMapping("/me")
     ResponseEntity<AccountResponse> myAccount(@AuthenticationPrincipal AuthenticatedUser user) {
         Account account = accountService.requireAccountFor(user.userId());
+        User institution = account.getInstitution();
         return ResponseEntity.ok(new AccountResponse(
                 account.getAccountNumber(),
                 account.getCurrency(),
                 accountService.balanceOf(account.getAccountId()),
-                account.getOpenedAt()
+                account.getOpenedAt(),
+                institution.getName(),
+                institution.getInstitutionCode()
         ));
     }
 

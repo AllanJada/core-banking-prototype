@@ -99,6 +99,18 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Schema migrations. The schema is owned by versioned SQL under db/migration rather
+             than generated from the entities, because ddl-auto=update never revises a
+             constraint once created (see ARCHITECTURE.md §9.2). Postgres support is a
+             separate module since Flyway 10. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

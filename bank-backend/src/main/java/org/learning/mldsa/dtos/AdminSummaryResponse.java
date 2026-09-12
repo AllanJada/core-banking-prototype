@@ -22,6 +22,7 @@ public class AdminSummaryResponse {
     private long customers;
     private long institutions;
     private long bankOperators;
+    /** Customer accounts only: a settlement account is an institution's position, not customer money. */
     private long accounts;
     /** Sum of every account balance — what the ledger says the platform is holding. */
     private BigDecimal totalHeld;

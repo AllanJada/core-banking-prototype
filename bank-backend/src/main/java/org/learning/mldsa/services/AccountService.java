@@ -2,8 +2,10 @@ package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.models.Account;
+import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.Posting;
 import org.learning.mldsa.models.PostingDirection;
+import org.learning.mldsa.models.Role;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.AccountRepository;
 import org.learning.mldsa.repositories.PostingRepository;
@@ -43,28 +45,37 @@ public class AccountService {
     @Value("${app.ledger.default-currency}")
     private String defaultCurrency;
 
-    /**
-     * Opens an account for a newly registered customer.
-     *
-     * Idempotent by ownership: an owner who already has an account gets that one back
-     * rather than a second, so retried registration can't quietly leave a customer with
-     * two accounts and a split balance.
-     */
+    /** Opens a newly provisioned customer's account at their institution. */
     @Transactional
-    public Account openAccountFor(User owner) {
-        return accountRepository.findByOwner_UserId(owner.getUserId())
-                .orElseGet(() -> {
-                    Account account = new Account();
-                    account.setAccountNumber(generateUniqueAccountNumber());
-                    account.setOwner(owner);
-                    account.setCurrency(defaultCurrency);
-                    account.setOpenedAt(Instant.now());
-                    return accountRepository.save(account);
-                });
+    public Account openCustomerAccount(User customer, User institution) {
+        if (institution.getRole() != Role.INSTITUTION) {
+            throw new RuntimeException("A customer account must be held at an institution");
+        }
+        return open(customer, institution, AccountType.CUSTOMER);
     }
 
+    /**
+     * Opens an institution's settlement account, which the institution both owns and is
+     * responsible for.
+     */
+    @Transactional
+    public Account openSettlementAccount(User institution) {
+        if (institution.getRole() != Role.INSTITUTION) {
+            throw new RuntimeException("Only an institution holds a settlement account");
+        }
+        return open(institution, institution, AccountType.SETTLEMENT);
+    }
+
+    /**
+     * The customer account a user owns.
+     *
+     * Restricted to CUSTOMER accounts on purpose. Every caller acts for a customer —
+     * deposits, payments, cards, statements — while an institution also owns an account, its
+     * settlement account. Filtering here means none of those operations can reach a
+     * settlement position even if a role check above them were ever loosened.
+     */
     public Account requireAccountFor(Long ownerId) {
-        return accountRepository.findByOwner_UserId(ownerId)
+        return accountRepository.findByOwner_UserIdAndType(ownerId, AccountType.CUSTOMER)
                 .orElseThrow(() -> new RuntimeException("No account is open for this user"));
     }
 
@@ -146,9 +157,53 @@ public class AccountService {
         return UUID.randomUUID().toString();
     }
 
-    private String generateUniqueAccountNumber() {
+    /**
+     * Idempotent by ownership: an owner who already has an account gets that one back rather
+     * than a second, so retried provisioning can't quietly leave a customer with two accounts
+     * and a split balance.
+     */
+    private Account open(User owner, User institution, AccountType type) {
+        return accountRepository.findByOwner_UserId(owner.getUserId())
+                .orElseGet(() -> {
+                    Account account = new Account();
+                    account.setAccountNumber(generateUniqueAccountNumber(institution));
+                    account.setOwner(owner);
+                    account.setType(type);
+                    account.setInstitution(institution);
+                    account.setCurrency(defaultCurrency);
+                    account.setOpenedAt(Instant.now());
+                    return accountRepository.save(account);
+                });
+    }
+
+    /**
+     * The institution's bank number, which prefixes the account and card numbers it issues.
+     *
+     * Fails loudly rather than falling back to an unprefixed number: an institution licensed
+     * before bank numbers existed would otherwise start issuing numbers that read as
+     * belonging to no bank, or worse, to a different one.
+     */
+    public String institutionNumberOf(User institution) {
+        String number = institution.getInstitutionNumber();
+        if (number == null || number.isBlank()) {
+            throw new RuntimeException("This institution has no bank number assigned");
+        }
+        return number;
+    }
+
+    /**
+     * A 16-digit number opening with the institution's bank number, the way a real account
+     * number identifies the bank holding it.
+     *
+     * The prefix is presentation, not routing: which institution an account belongs to is
+     * Account.institution, so nothing breaks if a number is read without it. Its first digit
+     * is 1-9 (bank numbers start at 100), so the number is always a full 16 characters and
+     * never loses a leading zero to anything downstream treating it as numeric.
+     */
+    private String generateUniqueAccountNumber(User institution) {
+        String prefix = institutionNumberOf(institution);
         for (int attempt = 0; attempt < MAX_ACCOUNT_NUMBER_ATTEMPTS; attempt++) {
-            String candidate = randomAccountNumber();
+            String candidate = prefix + randomDigits(ACCOUNT_NUMBER_LENGTH - prefix.length());
             if (!accountRepository.existsByAccountNumber(candidate)) {
                 return candidate;
             }
@@ -156,12 +211,9 @@ public class AccountService {
         throw new RuntimeException("Could not allocate a unique account number");
     }
 
-    private String randomAccountNumber() {
-        StringBuilder digits = new StringBuilder(ACCOUNT_NUMBER_LENGTH);
-        // First digit is 1-9 so the number is always a full 16 characters and never
-        // loses a leading zero if anything downstream treats it as numeric.
-        digits.append(1 + secureRandom.nextInt(9));
-        for (int i = 1; i < ACCOUNT_NUMBER_LENGTH; i++) {
+    private String randomDigits(int count) {
+        StringBuilder digits = new StringBuilder(count);
+        for (int i = 0; i < count; i++) {
             digits.append(secureRandom.nextInt(10));
         }
         return digits.toString();

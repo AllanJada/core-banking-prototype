@@ -23,4 +23,13 @@ public class AccountResponse {
     private String currency;
     private BigDecimal balance;
     private Instant openedAt;
+
+    /**
+     * The institution holding the account — the customer's own bank.
+     *
+     * A customer banks with exactly one institution, and the first three digits of their
+     * account number are that institution's bank number.
+     */
+    private String institutionName;
+    private String institutionCode;
 }

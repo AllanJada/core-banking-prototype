@@ -24,7 +24,7 @@ import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
 import { useNavigate } from "react-router-dom";
 import {
-  getAdminAccounts,
+  getAdminInstitutions,
   getAdminPayments,
   getAdminSummary,
   getAdminTransfers,
@@ -34,9 +34,9 @@ import ProvisionAccountDialog from "../components/ProvisionAccountDialog";
 import Pager from "../components/Pager";
 import { usePagedResource } from "../hooks/usePagedResource";
 import SignatureChip from "../components/SignatureChip";
-import type { AdminAccount, AdminSummary, FileTransfer, Payment } from "../types";
+import type { AdminSummary, FileTransfer, Institution, Payment } from "../types";
 
-type Section = "overview" | "accounts" | "payments" | "transfers";
+type Section = "overview" | "institutions" | "payments" | "transfers";
 
 function money(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -74,16 +74,15 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 }
 
 /**
- * The Bank role's oversight console.
+ * The Central Bank's console.
  *
- * This role watches the platform rather than taking part in it: everything here is
- * read-only except provisioning accounts, which is the one operation the role owns. There
- * is deliberately no way to adjust a balance, reverse a payment or unblock a card from this
- * screen — those would be changes to customers' money made from outside the ledger's own
- * rules.
+ * This role supervises institutions rather than taking part in banking: everything here is
+ * read-only except provisioning institutions and other overseers. There is deliberately no
+ * way to create a customer, adjust a balance, reverse a payment or unblock a card from this
+ * screen — customers belong to their institution.
  *
- * Refused payments are shown alongside successful ones, because what is being rejected is
- * usually the more useful signal for anyone monitoring the system.
+ * Institutions are shown as aggregates only. How much an institution's customers hold between
+ * them is supervision; who they are stays with their own bank.
  */
 export default function BankDashboardPage() {
   const { user, logout } = useAuth();
@@ -91,8 +90,8 @@ export default function BankDashboardPage() {
 
   const [section, setSection] = useState<Section>("overview");
   const [summary, setSummary] = useState<AdminSummary | null>(null);
-  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
-  // Both grow without bound across every participant, so both are paged.
+  // Each of these grows without bound, so all three are paged.
+  const institutions = usePagedResource<Institution>(getAdminInstitutions);
   const payments = usePagedResource<Payment>(getAdminPayments);
   const transfers = usePagedResource<FileTransfer>(getAdminTransfers);
   const [provisionOpen, setProvisionOpen] = useState(false);
@@ -103,7 +102,7 @@ export default function BankDashboardPage() {
     getAdminSummary()
       .then(setSummary)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load summary"));
-    getAdminAccounts().then(setAccounts).catch(() => undefined);
+    institutions.refresh();
     payments.refresh();
     transfers.refresh();
   }, []);
@@ -125,7 +124,7 @@ export default function BankDashboardPage() {
       <AppBar position="static" elevation={0}>
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            Administration
+            Central Bank
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.85, display: { xs: "none", sm: "block" } }}>
             Signed in as {user.username}
@@ -149,7 +148,7 @@ export default function BankDashboardPage() {
             startIcon={<PersonAddIcon />}
             onClick={() => setProvisionOpen(true)}
           >
-            Provision account
+            Provision
           </Button>
         </Box>
 
@@ -163,7 +162,7 @@ export default function BankDashboardPage() {
             sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}
           >
             <Tab label="Overview" value="overview" />
-            <Tab label={`Accounts (${accounts.length})`} value="accounts" />
+            <Tab label={`Institutions (${institutions.totalElements})`} value="institutions" />
             <Tab label={`Payments (${payments.totalElements})`} value="payments" />
             <Tab label={`Transfers (${transfers.totalElements})`} value="transfers" />
           </Tabs>
@@ -177,7 +176,7 @@ export default function BankDashboardPage() {
                     value={money(summary.totalHeld, summary.currency)}
                     hint="summed from the ledger, not a stored figure"
                   />
-                  <Stat label="Accounts" value={String(summary.accounts)} />
+                  <Stat label="Customer accounts" value={String(summary.accounts)} />
                   <Stat
                     label="Payments completed"
                     value={String(summary.completedPayments)}
@@ -192,7 +191,7 @@ export default function BankDashboardPage() {
                 <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
                   <Stat label="Customers" value={String(summary.customers)} />
                   <Stat label="Institutions" value={String(summary.institutions)} />
-                  <Stat label="Bank operators" value={String(summary.bankOperators)} />
+                  <Stat label="Central Bank overseers" value={String(summary.bankOperators)} />
                   <Stat
                     label="File transfers"
                     value={String(summary.fileTransfers)}
@@ -202,46 +201,47 @@ export default function BankDashboardPage() {
               </Stack>
             )}
 
-            {section === "accounts" && (
+            {section === "institutions" && (
+              <>
               <TableContainer>
-                <Table size="small" sx={{ minWidth: 640 }}>
+                <Table size="small" sx={{ minWidth: 720 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Account number</TableCell>
-                      <TableCell>Owner</TableCell>
-                      <TableCell align="right">Balance</TableCell>
-                      <TableCell>Card</TableCell>
-                      <TableCell>Opened</TableCell>
+                      <TableCell>Code</TableCell>
+                      <TableCell>Institution</TableCell>
+                      <TableCell>Bank number</TableCell>
+                      <TableCell>Settlement account</TableCell>
+                      <TableCell align="right">Customers</TableCell>
+                      <TableCell align="right">Customer funds</TableCell>
+                      <TableCell align="right">Settlement position</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {accounts.map((account) => (
-                      <TableRow key={account.accountId}>
-                        <TableCell sx={{ letterSpacing: 0.5 }}>{account.accountNumber}</TableCell>
-                        <TableCell>{account.ownerUsername}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                          {money(account.balance, account.currency)}
-                        </TableCell>
+                    {institutions.items.map((institution) => (
+                      <TableRow key={institution.userId}>
                         <TableCell>
-                          {account.cardStatus ? (
-                            <Chip
-                              size="small"
-                              label={`${account.cardNumber} · ${account.cardStatus}`}
-                              color={account.cardStatus === "ACTIVE" ? "success" : "default"}
-                              variant="outlined"
-                            />
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">
-                              none
-                            </Typography>
-                          )}
+                          <Chip size="small" variant="outlined" label={institution.institutionCode} />
                         </TableCell>
-                        <TableCell>{formatDate(account.openedAt)}</TableCell>
+                        <TableCell>{institution.username}</TableCell>
+                        {/* The digits every account and card number it issues begins with. */}
+                        <TableCell sx={{ letterSpacing: 0.5 }}>{institution.institutionNumber}</TableCell>
+                        <TableCell sx={{ letterSpacing: 0.5 }}>
+                          {institution.settlementAccountNumber}
+                        </TableCell>
+                        <TableCell align="right">{institution.customerCount}</TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                          {money(institution.customerFundsHeld, institution.currency)}
+                        </TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                          {money(institution.settlementPosition, institution.currency)}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </TableContainer>
+              <Pager {...institutions} onPageChange={institutions.setPage} />
+              </>
             )}
 
             {section === "payments" && (
@@ -335,15 +335,15 @@ export default function BankDashboardPage() {
       <ProvisionAccountDialog
         open={provisionOpen}
         onClose={() => setProvisionOpen(false)}
-        onProvisioned={(username) => {
-          setSnackbar(`Account created for ${username}`);
+        onProvisioned={(message) => {
+          setSnackbar(message);
           refresh();
         }}
       />
 
       <Snackbar
         open={snackbar !== null}
-        autoHideDuration={3000}
+        autoHideDuration={4000}
         onClose={() => setSnackbar(null)}
         message={snackbar}
       />

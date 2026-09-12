@@ -2,6 +2,7 @@ package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.models.Account;
+import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.Deposit;
 import org.learning.mldsa.models.Payment;
 import org.learning.mldsa.models.PaymentStatus;
@@ -94,7 +95,12 @@ public class PaymentService {
 
         Account from = accountService.requireAccountFor(userId);
 
-        Account to = accountRepository.findByAccountNumber(toAccountNumber).orElse(null);
+        Account to = accountRepository.findByAccountNumber(toAccountNumber)
+                // Settlement accounts move only through inter-bank settlement, never by a
+                // customer paying one. Refused exactly as an unknown number is, so this
+                // endpoint can't be used to find out which numbers are settlement accounts.
+                .filter(account -> account.getType() == AccountType.CUSTOMER)
+                .orElse(null);
         if (to == null) {
             throw reject(from, null, amount, description, "No account exists with that number");
         }

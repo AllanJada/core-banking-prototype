@@ -1,96 +1,132 @@
 package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
+import org.learning.mldsa.dtos.InstitutionRequest;
+import org.learning.mldsa.dtos.ProvisionRequest;
 import org.learning.mldsa.dtos.UserRequest;
 import org.learning.mldsa.dtos.UserResponse;
+import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.Role;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.UserRepositories;
-import org.learning.mldsa.security.AuthenticatedUser;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.KeyPair;
+import java.security.SecureRandom;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * Provisioning, along a chain of custody: every account is created by the tier directly
+ * above it. The Central Bank creates institutions and other overseers, and an institution
+ * creates its own customers — so there is always an identifiable party responsible for an
+ * account's existence.
+ *
+ * Each tier has its own method, called from its own role-guarded endpoint, rather than one
+ * method whose permitted effect depends on a role named in the request.
+ */
 @RequiredArgsConstructor
 @Service
 public class UserService {
+
+    private static final Pattern INSTITUTION_CODE = Pattern.compile("[A-Z0-9]{3,8}");
+
+    // Bank numbers run 100-999: three digits, never with a leading zero, so the prefix on an
+    // account number is always the same width and can be read straight off it.
+    private static final int INSTITUTION_NUMBER_ORIGIN = 100;
+    private static final int INSTITUTION_NUMBER_BOUND = 1000;
+    private static final int MAX_INSTITUTION_NUMBER_ATTEMPTS = 20;
+
     private final UserRepositories userRepositories;
     private final PasswordEncoder passwordEncoder;
     private final CryptoService cryptoService;
     private final AccountService accountService;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    /** Whether no Central Bank overseer exists yet — the only state in which bootstrap is allowed. */
+    public boolean isBootstrapOpen() {
+        return !userRepositories.existsByRole(Role.BANK);
+    }
 
     /**
-     * Registers an account and, for customers, opens their banking account alongside it.
+     * Creates the system's first Central Bank overseer, and nothing else.
      *
-     * Transactional because registration now writes to two modules' tables: a customer
-     * left with a login but no account — or an account with no owner — would be a state
-     * nothing in the system knows how to repair.
+     * Anonymous creation is allowed only while no BANK account exists, since until then there
+     * is nobody who could authorise one. The window produces an overseer only: an institution
+     * created here would exist before any supervisor did. A request naming another role is
+     * refused rather than quietly turned into an overseer, so a client can't mistake what it
+     * got. Once an overseer exists the window closes for good.
      */
     @Transactional
-    public UserResponse createNewUser(UserRequest request, AuthenticatedUser caller) {
-        requireMayProvision(caller);
+    public UserResponse bootstrap(UserRequest request) {
+        if (!isBootstrapOpen()) {
+            throw new AccessDeniedException("The system is already provisioned");
+        }
+        if (request.getRole() != null && request.getRole() != Role.BANK) {
+            throw new RuntimeException("The first account must be a Central Bank overseer");
+        }
+        return toResponse(userRepositories.save(
+                newUser(request.getUsername(), request.getPassword(), Role.BANK)));
+    }
 
-        if (userRepositories.existsByName(request.getUsername())) {
-            throw new RuntimeException("User already exists");
+    /** Creates another Central Bank overseer, on an existing overseer's authority. */
+    @Transactional
+    public UserResponse createOverseer(ProvisionRequest request) {
+        return toResponse(userRepositories.save(
+                newUser(request.getUsername(), request.getPassword(), Role.BANK)));
+    }
+
+    /**
+     * Licenses an institution and opens its settlement account.
+     *
+     * One transaction for both: an institution without a settlement account would have
+     * nowhere for an inter-bank payment to settle, and nothing in the system would know how to
+     * repair that.
+     *
+     * @return the settlement account, whose owner and institution are the new institution
+     */
+    @Transactional
+    public Account createInstitution(InstitutionRequest request) {
+        String code = requireWellFormedInstitutionCode(request.getInstitutionCode());
+        if (userRepositories.existsByInstitutionCode(code)) {
+            throw new RuntimeException("An institution with that code already exists");
         }
 
-        User user = new User();
-        user.setName(request.getUsername());
-        user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(request.getRole() != null ? request.getRole() : Role.NORMAL_USER);
+        User institution = newUser(request.getUsername(), request.getPassword(), Role.INSTITUTION);
+        institution.setInstitutionCode(code);
+        institution.setInstitutionNumber(generateUniqueInstitutionNumber());
         // Normalised to uppercase: BICs are case-insensitive by definition but compared as
         // strings here, so storing one shape avoids two spellings of the same institution.
-        user.setBic(request.getBic() == null || request.getBic().isBlank()
+        institution.setBic(request.getBic() == null || request.getBic().isBlank()
                 ? null
                 : request.getBic().trim().toUpperCase());
 
-        // Every account gets its own Ed25519 key pair at registration, regardless of
-        // role. The private key is used later to sign files this account sends; the
-        // public key is handed to recipients (implicitly, via lookup) to verify those
-        // signatures.
-        KeyPair keyPair = cryptoService.generateSigningKeyPair();
-        user.setPublicKey(cryptoService.encodePublicKey(keyPair.getPublic()));
-        user.setPrivateKey(cryptoService.encodePrivateKey(keyPair.getPrivate()));
-
-        User savedUser = userRepositories.save(user);
-
-        // Only customers hold a money account. Institutions and the bank role take part in
-        // file transfer and oversight respectively, neither of which has a balance.
-        if (savedUser.getRole() == Role.NORMAL_USER) {
-            accountService.openAccountFor(savedUser);
-        }
-
-        return new UserResponse(savedUser.getUserId(), savedUser.getName(), savedUser.getRole());
-
+        return accountService.openSettlementAccount(userRepositories.save(institution));
     }
 
     /**
-     * Decides whether the caller may provision an account.
+     * Creates a customer and opens their account at the calling institution.
      *
-     * Anonymous creation is allowed only while the system has no Bank account at all —
-     * otherwise there would be no way to create the first one, since the role that
-     * authorises provisioning would not yet exist. Once a Bank account exists that door
-     * closes for good, and provisioning belongs to the console.
+     * The institution comes from the caller's token, passed down by the controller, and never
+     * from the request body — an institution cannot open a customer at another bank by naming
+     * it. Login and account are written in one transaction, so a customer can never end up
+     * with one and not the other.
+     *
+     * @return the customer's new account
      */
-    private void requireMayProvision(AuthenticatedUser caller) {
-        if (caller != null && caller.role() == Role.BANK) {
-            return;
-        }
-        if (!userRepositories.existsByRole(Role.BANK)) {
-            return;
-        }
-        throw new AccessDeniedException("Only a bank operator can create accounts");
-    }
+    @Transactional
+    public Account createCustomer(Long institutionId, ProvisionRequest request) {
+        User institution = userRepositories.findById(institutionId)
+                .filter(user -> user.getRole() == Role.INSTITUTION)
+                .orElseThrow(() -> new AccessDeniedException("Only an institution can create customers"));
 
-    public List<UserResponse> listUsers() {
-        return userRepositories.findAll().stream()
-                .map(u -> new UserResponse(u.getUserId(), u.getName(), u.getRole()))
-                .collect(Collectors.toList());
+        User customer = userRepositories.save(
+                newUser(request.getUsername(), request.getPassword(), Role.NORMAL_USER));
+        return accountService.openCustomerAccount(customer, institution);
     }
 
     /**
@@ -106,8 +142,63 @@ public class UserService {
         return userRepositories.findAll().stream()
                 .filter(u -> u.getRole() == role)
                 .filter(u -> !u.getUserId().equals(requestingUserId))
-                .map(u -> new UserResponse(u.getUserId(), u.getName(), u.getRole()))
+                .map(UserService::toResponse)
                 .collect(Collectors.toList());
     }
 
+    /** An unsaved account with its credentials and signing keys, after the checks every tier shares. */
+    private User newUser(String username, String password, Role role) {
+        if (username == null || username.isBlank() || password == null || password.isEmpty()) {
+            throw new RuntimeException("A username and password are both required");
+        }
+        String name = username.trim();
+        if (userRepositories.existsByName(name)) {
+            throw new RuntimeException("User already exists");
+        }
+
+        User user = new User();
+        user.setName(name);
+        user.setPassword(passwordEncoder.encode(password));
+        user.setRole(role);
+
+        // Every account gets its own Ed25519 key pair at registration, regardless of
+        // role. The private key is used later to sign what this account produces; the
+        // public key is handed to recipients (implicitly, via lookup) to verify those
+        // signatures.
+        KeyPair keyPair = cryptoService.generateSigningKeyPair();
+        user.setPublicKey(cryptoService.encodePublicKey(keyPair.getPublic()));
+        user.setPrivateKey(cryptoService.encodePrivateKey(keyPair.getPrivate()));
+
+        return user;
+    }
+
+    /**
+     * Allocates the institution's bank number.
+     *
+     * Collisions are re-rolled rather than fatal, and the retries are bounded so a system
+     * that has genuinely run out of numbers says so instead of looping forever — the same
+     * shape account and card number allocation uses.
+     */
+    private String generateUniqueInstitutionNumber() {
+        for (int attempt = 0; attempt < MAX_INSTITUTION_NUMBER_ATTEMPTS; attempt++) {
+            String candidate = String.valueOf(INSTITUTION_NUMBER_ORIGIN
+                    + secureRandom.nextInt(INSTITUTION_NUMBER_BOUND - INSTITUTION_NUMBER_ORIGIN));
+            if (!userRepositories.existsByInstitutionNumber(candidate)) {
+                return candidate;
+            }
+        }
+        throw new RuntimeException("Could not allocate an institution number");
+    }
+
+    private String requireWellFormedInstitutionCode(String code) {
+        String normalised = code == null ? "" : code.trim().toUpperCase();
+        if (!INSTITUTION_CODE.matcher(normalised).matches()) {
+            throw new RuntimeException("Institution code must be 3 to 8 letters or digits");
+        }
+        return normalised;
+    }
+
+    private static UserResponse toResponse(User user) {
+        return new UserResponse(user.getUserId(), user.getName(), user.getRole());
+    }
 }

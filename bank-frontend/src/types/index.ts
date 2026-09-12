@@ -18,6 +18,9 @@ export interface Account {
   /** Derived from the account's postings on each request, never a stored counter. */
   balance: number;
   openedAt: string;
+  /** The institution holding the account — the customer banks with exactly one. */
+  institutionName: string;
+  institutionCode: string;
 }
 
 export type PostingDirection = "CREDIT" | "DEBIT";
@@ -47,11 +50,38 @@ export interface Page<T> {
   hasNext: boolean;
 }
 
-/** An account as the Bank role sees it — with its owner, and no secrets. */
-export interface AdminAccount {
-  accountId: number;
+/**
+ * An institution as the Central Bank sees it: aggregates only, never the identities or
+ * individual balances of its customers.
+ */
+export interface Institution {
+  userId: number;
+  username: string;
+  institutionCode: string;
+  /** The three digits prefixing every account and card number this institution issues. */
+  institutionNumber: string;
+  settlementAccountNumber: string;
+  currency: string;
+  customerCount: number;
+  /** Sum of this institution's customer balances, derived from the ledger. */
+  customerFundsHeld: number;
+  /** The settlement account's balance. Negative means a net debtor to the system. */
+  settlementPosition: number;
+}
+
+export interface InstitutionRequest {
+  username: string;
+  password: string;
+  /** 3–8 letters or digits; stored uppercase and unique. */
+  institutionCode: string;
+  bic?: string;
+}
+
+/** A customer as their own institution sees them — with no secrets. */
+export interface Customer {
+  userId: number;
+  username: string;
   accountNumber: string;
-  ownerUsername: string;
   currency: string;
   balance: number;
   openedAt: string;
@@ -64,6 +94,7 @@ export interface AdminSummary {
   customers: number;
   institutions: number;
   bankOperators: number;
+  /** Customer accounts only — settlement accounts are institutions' positions. */
   accounts: number;
   /** Sum of every account balance — what the ledger says the platform holds. */
   totalHeld: number;
@@ -134,7 +165,14 @@ export interface PaymentRequest {
   description: string;
 }
 
-export type TransferStatus = "SENT" | "DOWNLOADED";
+/**
+ * A transfer's lifecycle from the recipient's side.
+ *
+ * SENT is the only status a transfer can be picked up from indirectly — the recipient
+ * must move it to APPROVED first. Previewing the document and its payload is allowed at
+ * any status; only the final download is gated on having approved it.
+ */
+export type TransferStatus = "SENT" | "APPROVED" | "REJECTED" | "DOWNLOADED";
 
 export interface FileTransfer {
   transferId: number;
@@ -151,6 +189,43 @@ export interface FileTransfer {
   uetr?: string;
   /** Whether an ISO 20022 pain.001 payload accompanies the document. */
   hasPayload?: boolean;
+  /** When the recipient approved or rejected this transfer; null while still SENT. */
+  reviewedAt?: string | null;
+  /** Why the recipient rejected this transfer; null unless status is REJECTED. */
+  rejectionReason?: string | null;
+}
+
+/**
+ * What a recipient sees when reviewing a transfer before deciding to approve or reject it.
+ *
+ * Mirrors the backend's PaymentPreviewResponse exactly, including its resilience: a failed
+ * integrity check comes back here as `integrityValid: false` with a reason, not as a
+ * rejected request — the review screen has to be able to render the bad case too.
+ */
+export interface PaymentPreview {
+  transferId: number;
+  senderUsername: string;
+  receiverUsername: string;
+  originalFilename: string;
+  status: TransferStatus;
+  sentAt: string;
+  uetr: string | null;
+  hasPayload: boolean;
+  integrityValid: boolean;
+  integrityWarning: string | null;
+  payload: PaymentPreviewPayload | null;
+}
+
+/** The payment instruction's key fields, read out of the ISO 20022 payload. */
+export interface PaymentPreviewPayload {
+  debtorName: string;
+  debtorAccountNumber: string;
+  creditorName: string;
+  creditorAccountNumber: string;
+  amount: number;
+  currency: string;
+  executionDate: string;
+  remittanceInformation: string | null;
 }
 
 export interface SlipLineItem {

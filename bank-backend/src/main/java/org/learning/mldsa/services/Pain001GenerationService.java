@@ -3,6 +3,7 @@ package org.learning.mldsa.services;
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBElement;
 import jakarta.xml.bind.Marshaller;
+import org.learning.mldsa.dtos.PaymentPreviewResponse;
 import org.learning.mldsa.dtos.PostalAddress;
 import org.learning.mldsa.dtos.SlipRequest;
 import org.learning.mldsa.iso20022.pain001.*;
@@ -114,6 +115,52 @@ public class Pain001GenerationService {
         byte[] xml = marshal(document);
         validateOrThrow(xml);
         return xml;
+    }
+
+    /**
+     * Reads a stored pain.001 payload back out into the handful of fields a human reviewer
+     * actually wants to see: who is being paid, how much, and why.
+     *
+     * Deliberately narrow — this is not a general-purpose ISO 20022 reader, it extracts the
+     * same shape of data this service just wrote (single payment instruction, single
+     * transaction). Callers are expected to have already verified the payload's integrity;
+     * this method assumes the bytes are trustworthy and only unmarshals them.
+     */
+    public PaymentPreviewResponse.PayloadPreview parsePreview(byte[] xml) {
+        try {
+            Object root = jaxbContext.createUnmarshaller().unmarshal(new ByteArrayInputStream(xml));
+            Document document = root instanceof JAXBElement<?> element
+                    ? (Document) element.getValue()
+                    : (Document) root;
+
+            PaymentInstruction30 payment = document.getCstmrCdtTrfInitn().getPmtInf().get(0);
+            CreditTransferTransaction34 transaction = payment.getCdtTrfTxInf().get(0);
+            ActiveOrHistoricCurrencyAndAmount instructedAmount = transaction.getAmt().getInstdAmt();
+            RemittanceInformation16 remittance = transaction.getRmtInf();
+
+            return new PaymentPreviewResponse.PayloadPreview(
+                    payment.getDbtr().getNm(),
+                    accountNumberOf(payment.getDbtrAcct()),
+                    transaction.getCdtr().getNm(),
+                    accountNumberOf(transaction.getCdtrAcct()),
+                    instructedAmount.getValue(),
+                    instructedAmount.getCcy(),
+                    payment.getReqdExctnDt().getDt().toString(),
+                    remittance == null || remittance.getUstrd().isEmpty() ? null : remittance.getUstrd().get(0)
+            );
+        } catch (Exception e) {
+            // Parsing failure here means the payload passed schema validation at generation
+            // time but this reader still cannot make sense of it — a bug in this method, not
+            // a tampering signal (that is caught separately, by the hash check before this is
+            // ever called). Surfaced as a message a reviewer can act on rather than a 500.
+            throw new RuntimeException("Could not read the ISO 20022 payload for preview", e);
+        }
+    }
+
+    /** The account number carried in Othr/Id — see the account() builder for why never IBAN. */
+    private String accountNumberOf(CashAccount38 account) {
+        GenericAccountIdentification1 generic = account.getId().getOthr();
+        return generic != null ? generic.getId() : account.getId().getIBAN();
     }
 
     /**

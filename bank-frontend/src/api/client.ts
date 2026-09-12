@@ -1,16 +1,18 @@
 import type {
   Account,
   Page,
-  AdminAccount,
   AdminSummary,
   AuthSession,
-  Role,
+  Customer,
   DebitCard,
   DepositRequest,
   FileTransfer,
+  Institution,
+  InstitutionRequest,
   Payment,
   PaymentLink,
   PaymentLinkRequest,
+  PaymentPreview,
   PaymentRequest,
   Posting,
   SlipRequest,
@@ -29,7 +31,7 @@ interface ApiErrorBody {
 /**
  * Attaches the bearer token to a request when there is one.
  *
- * Every endpoint except login and account creation requires it — the backend derives
+ * Every endpoint except login and first-time setup requires it — the backend derives
  * the acting account from this token, which is why none of the calls below pass a
  * userId any more.
  */
@@ -105,10 +107,12 @@ export async function getAdminSummary(): Promise<AdminSummary> {
   return handleResponse<AdminSummary>(response);
 }
 
-/** Every account with its balance and card status. Bank role only. */
-export async function getAdminAccounts(): Promise<AdminAccount[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/admin/accounts`, { headers: authHeaders() });
-  return handleResponse<AdminAccount[]>(response);
+/** Institutions with their aggregates — never their customers. Bank role only. */
+export async function getAdminInstitutions(page?: number, size?: number): Promise<Page<Institution>> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/institutions${pageQuery(page, size)}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<Page<Institution>>(response);
 }
 
 /** Every payment across all accounts, refused ones included. Bank role only. */
@@ -127,28 +131,76 @@ export async function getAdminTransfers(page?: number, size?: number): Promise<P
   return handleResponse<Page<FileTransfer>>(response);
 }
 
-/** Provisions an account. Only the Bank role may do this once one exists. */
-export async function createUser(
-  username: string,
-  password: string,
-  role: Role
-): Promise<User> {
+/** Whether the system still has no Central Bank overseer, so first-time setup is open. */
+export async function getBootstrapStatus(): Promise<{ open: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/users/bootstrap`);
+  return handleResponse<{ open: boolean }>(response);
+}
+
+/**
+ * Creates the first Central Bank overseer on an empty system. Needs no token; the backend
+ * refuses it once any overseer exists.
+ */
+export async function bootstrapOverseer(username: string, password: string): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/api/v1/users`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, role: "BANK" }),
+  });
+  return handleResponse<User>(response);
+}
+
+/** Licenses an institution; its settlement account is opened with it. Bank role only. */
+export async function createInstitution(request: InstitutionRequest): Promise<Institution> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/institutions`, {
+    method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ username, password, role }),
+    body: JSON.stringify(request),
+  });
+  return handleResponse<Institution>(response);
+}
+
+/** Adds another Central Bank overseer. Bank role only. */
+export async function createOverseer(username: string, password: string): Promise<User> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/overseers`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ username, password }),
   });
   return handleResponse<User>(response);
 }
 
 /**
- * Every account in the system — an oversight view, so the backend allows it only for the
- * Bank role. Other roles get a 403 rather than a filtered list, on purpose: the ordinary
- * "who can I send to" question is listCounterparties() below.
+ * Creates a customer, and opens their account, at the signed-in institution. There is no
+ * institution parameter: the backend takes it from the token.
  */
-export async function listAllUsers(): Promise<User[]> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/users`, { headers: authHeaders() });
-  return handleResponse<User[]>(response);
+export async function createCustomer(username: string, password: string): Promise<Customer> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/institution/customers`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ username, password }),
+  });
+  return handleResponse<Customer>(response);
+}
+
+/** The signed-in institution's own customers, newest first. */
+export async function getMyCustomers(page?: number, size?: number): Promise<Page<Customer>> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/institution/customers${pageQuery(page, size)}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<Page<Customer>>(response);
+}
+
+/**
+ * Unblocks a customer's card. The backend looks the customer up within the signed-in
+ * institution only, so another bank's customer comes back as not found.
+ */
+export async function unblockCustomerCard(customerId: number): Promise<Customer> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/institution/customers/${customerId}/card/unblock`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return handleResponse<Customer>(response);
 }
 
 /**
@@ -184,6 +236,56 @@ export async function getMyPostings(page?: number, size?: number): Promise<Page<
  * failure here means the payment instruction no longer matches what was signed — not
  * merely that a file was missing.
  */
+/** The structured review summary for a transfer — never throws on a failed integrity check. */
+export async function previewTransfer(transferId: number): Promise<PaymentPreview> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/files/${transferId}/preview`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<PaymentPreview>(response);
+}
+
+/**
+ * The document itself, as a blob rather than triggering a save-as — used to render it
+ * inline in the review dialog. A plain `<iframe src="...">` can't carry the Authorization
+ * header this endpoint requires, so the bytes are fetched here and turned into an object
+ * URL the caller is responsible for revoking once the dialog closes.
+ */
+export async function fetchPreviewDocument(transferId: number): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/files/${transferId}/preview/document`, {
+    headers: authHeaders(),
+  });
+  if (!response.ok) {
+    let message = `Could not load the document (${response.status})`;
+    try {
+      const body: ApiErrorBody = await response.json();
+      if (body.message) message = body.message;
+    } catch {
+      // fall back to generic message
+    }
+    throw new Error(message);
+  }
+  return response.blob();
+}
+
+/** Accepts a transfer, the decision that makes it downloadable. */
+export async function approveTransfer(transferId: number): Promise<FileTransfer> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/files/${transferId}/approve`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  return handleResponse<FileTransfer>(response);
+}
+
+/** Refuses a transfer. Terminal, and requires a reason the sender can act on. */
+export async function rejectTransfer(transferId: number, reason: string): Promise<FileTransfer> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/files/${transferId}/reject`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ reason }),
+  });
+  return handleResponse<FileTransfer>(response);
+}
+
 export async function downloadPayload(
   transferId: number,
   originalFilename: string

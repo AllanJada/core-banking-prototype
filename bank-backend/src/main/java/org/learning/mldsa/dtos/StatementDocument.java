@@ -20,6 +20,12 @@ public class StatementDocument {
 
     private final String accountNumber;
     private final String accountHolder;
+
+    /** The institution issuing this statement — printed as its heading, and its signer. */
+    private final String institutionName;
+    private final String institutionCode;
+    private final String institutionNumber;
+
     private final String currency;
     private final String periodFrom;
     private final String periodTo;
@@ -35,7 +41,7 @@ public class StatementDocument {
      */
     private final String generatedAtIso;
 
-    /** Ed25519 signature over the statement's figures, made with the account owner's key. */
+    /** Ed25519 signature over the statement's figures, made with the issuing institution's key. */
     private final String signature;
 
     private final List<StatementLine> lines;

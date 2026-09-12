@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -14,9 +14,10 @@ import {
 } from "@mui/material";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import { login as loginRequest } from "../api/client";
+import { getBootstrapStatus, login as loginRequest } from "../api/client";
 import cardLogo from "../assets/cardLogo.png";
 import { useAuth } from "../context/AuthContext";
+import BootstrapOverseerDialog from "../components/BootstrapOverseerDialog";
 import GlassCard from "../components/GlassCard";
 import LoginBackground from "../components/LoginBackground";
 import SecurityHighlights from "../components/SecurityHighlights";
@@ -59,10 +60,20 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [bootstrapOpen, setBootstrapOpen] = useState(false);
+  const [setupDialogOpen, setSetupDialogOpen] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // An empty database has nobody who could sign in, so first-time setup is offered in that
+  // one case. A failed check just leaves it hidden — the normal sign-in still works.
+  useEffect(() => {
+    getBootstrapStatus()
+      .then((status) => setBootstrapOpen(status.open))
+      .catch(() => setBootstrapOpen(false));
+  }, []);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -138,10 +149,11 @@ export default function LoginPage() {
 
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700, color: "#fff", ...textShadowSx, textAlign: "center" }}>
-              Secure File Transfer
+              Core Banking System
             </Typography>
             <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.7)", mt: 0.5, ...textShadowSx }}>
-              Direct, auditable file exchange between financial institutions.
+              Accounts, payments, and inter-institutional transfers on one signed, auditable
+              ledger.
             </Typography>
           </Box>
 
@@ -156,7 +168,18 @@ export default function LoginPage() {
           elevation={0}
           component="form"
           onSubmit={handleSubmit}
-          sx={{ flex: 1, p: { xs: 3, md: 5 }, border: "none", borderRadius: 0, boxShadow: "none" }}
+          sx={{
+            flex: 1,
+            p: { xs: 3, md: 5 },
+            border: "none",
+            borderRadius: 0,
+            boxShadow: "none",
+            // Centers the sign-in Stack within the panel's full height, rather than
+            // letting it sit at the top with whatever space is left below it.
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+          }}
         >
           <Stack spacing={2.5}>
             <Box>
@@ -169,6 +192,19 @@ export default function LoginPage() {
             </Box>
 
             {error && <Alert severity="error">{error}</Alert>}
+
+            {bootstrapOpen && (
+              <Alert
+                severity="info"
+                action={
+                  <Button color="inherit" size="small" onClick={() => setSetupDialogOpen(true)}>
+                    Set up
+                  </Button>
+                }
+              >
+                No Central Bank overseer exists yet.
+              </Alert>
+            )}
 
             <TextField
               label="Username"
@@ -228,7 +264,7 @@ export default function LoginPage() {
                 sx={linkSx}
                 underline="hover"
                 onClick={() =>
-                  setInfoMessage("Self-service account creation isn't available yet. Contact your administrator.")
+                  setInfoMessage("Accounts are opened by your bank. Contact your institution to open one.")
                 }
               >
                 Create account
@@ -252,6 +288,17 @@ export default function LoginPage() {
         autoHideDuration={4000}
         onClose={() => setInfoMessage(null)}
         message={infoMessage}
+      />
+
+      <BootstrapOverseerDialog
+        open={setupDialogOpen}
+        onClose={() => setSetupDialogOpen(false)}
+        onCreated={(createdUsername) => {
+          setBootstrapOpen(false);
+          setUsername(createdUsername);
+          setPassword("");
+          setInfoMessage("Central Bank overseer created. Sign in to continue.");
+        }}
       />
     </LoginBackground>
   );

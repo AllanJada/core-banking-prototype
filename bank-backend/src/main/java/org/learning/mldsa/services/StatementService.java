@@ -5,6 +5,7 @@ import org.learning.mldsa.dtos.StatementDocument;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.Posting;
 import org.learning.mldsa.models.PostingDirection;
+import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.PostingRepository;
 import org.springframework.stereotype.Service;
 
@@ -57,6 +58,7 @@ public class StatementService {
         }
 
         Account account = accountService.requireAccountFor(userId);
+        User institution = account.getInstitution();
 
         Instant periodStart = from.atStartOfDay(STATEMENT_ZONE).toInstant();
         // Exclusive end: the start of the day after the requested one, so the whole of the
@@ -97,19 +99,27 @@ public class StatementService {
         Instant generatedAt = Instant.now();
 
         // Signed over the figures the statement asserts, not over the rendered bytes: a PDF
-        // cannot contain a signature computed from itself. What this proves is that these
-        // balances for this period were produced by this account's key — so altering a
-        // figure on the page leaves a signature that no longer matches it. It does not
-        // detect edits to the surrounding layout, and because the server holds every
-        // account's private key it is not proof against this server itself.
+        // cannot contain a signature computed from itself. Altering a figure on the page
+        // leaves a signature that no longer matches it. It does not detect edits to the
+        // surrounding layout, and because the server holds every private key it is not proof
+        // against this server itself.
+        //
+        // Signed with the INSTITUTION's key, not the customer's. A statement is a document
+        // the bank issues *about* an account, so the party attesting to these figures is the
+        // bank that holds it — which is also why a verifier checks it against the
+        // institution's public key rather than the customer's. The envelope's shape is
+        // unchanged; only its signer is.
         String envelope = cryptoService.buildStatementEnvelope(
                 account.getAccountNumber(), periodFrom, periodTo,
                 openingBalance, runningBalance, generatedAt.toString());
-        String signature = cryptoService.sign(envelope, cryptoService.signingKeyOf(account.getOwner()));
+        String signature = cryptoService.sign(envelope, cryptoService.signingKeyOf(institution));
 
         return new StatementDocument(
                 account.getAccountNumber(),
                 account.getOwner().getName(),
+                institution.getName(),
+                institution.getInstitutionCode(),
+                institution.getInstitutionNumber(),
                 account.getCurrency(),
                 periodFrom,
                 periodTo,

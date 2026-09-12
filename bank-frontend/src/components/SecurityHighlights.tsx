@@ -1,8 +1,9 @@
 import { Stack, Typography, Box } from "@mui/material";
 import type { SvgIconComponent } from "@mui/icons-material";
+import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
+import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
-import SwapHorizOutlinedIcon from "@mui/icons-material/SwapHorizOutlined";
-import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import RateReviewOutlinedIcon from "@mui/icons-material/RateReviewOutlined";
 
 interface Highlight {
   icon: SvgIconComponent;
@@ -12,9 +13,10 @@ interface Highlight {
 // Phrased to describe what the system actually does today, not aspirational
 // compliance claims it hasn't earned yet.
 const HIGHLIGHTS: Highlight[] = [
-  { icon: SwapHorizOutlinedIcon, text: "Direct file exchange between institutions" },
-  { icon: LockOutlinedIcon, text: "Passwords hashed, never stored in plain text" },
-  { icon: VisibilityOutlinedIcon, text: "Full visibility into every transfer's status" },
+  { icon: AccountBalanceOutlinedIcon, text: "Balances derived from an immutable, double-entry ledger" },
+  { icon: VerifiedUserOutlinedIcon, text: "Every document and payment signed with Ed25519" },
+  { icon: LockOutlinedIcon, text: "Files encrypted at rest with AES-256-GCM" },
+  { icon: RateReviewOutlinedIcon, text: "Incoming transfers reviewed and approved before pickup" },
 ];
 
 // Same readability workaround as LoginPage: a dark halo behind text/icons,

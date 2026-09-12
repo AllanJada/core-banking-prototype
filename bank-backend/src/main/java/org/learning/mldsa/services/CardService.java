@@ -28,6 +28,7 @@ import java.util.Optional;
 public class CardService {
 
     private static final int CARD_NUMBER_LENGTH = 16;
+    private static final char CARD_LEADING_DIGIT = '4';
     private static final int MAX_CARD_NUMBER_ATTEMPTS = 10;
     private static final int PIN_LENGTH = 4;
 
@@ -64,7 +65,7 @@ public class CardService {
                 .minusDays(1);
 
         DebitCard card = new DebitCard();
-        card.setCardNumber(generateUniqueCardNumber());
+        card.setCardNumber(generateUniqueCardNumber(account));
         card.setAccount(account);
         card.setExpiresOn(expiresOn);
         card.setStatus(CardStatus.ACTIVE);
@@ -122,7 +123,10 @@ public class CardService {
         debitCardRepository.save(card);
     }
 
-    /** Blocks the card. Deliberately one-way: unblocking is a bank operation, not a customer one. */
+    /**
+     * Blocks the card. Deliberately one-way for the customer: unblocking is a bank operation,
+     * performed by the customer's own institution (see unblock).
+     */
     @Transactional
     public DebitCard block(Long userId) {
         DebitCard card = requireCardFor(userId);
@@ -130,6 +134,26 @@ public class CardService {
             throw new RuntimeException("This card is already blocked");
         }
         card.setStatus(CardStatus.BLOCKED);
+        return debitCardRepository.save(card);
+    }
+
+    /**
+     * Returns a blocked card to service and clears its wrong-PIN count, so the customer starts
+     * again with the full number of attempts.
+     *
+     * Takes the account rather than a user id: this is the bank's operation, and the caller is
+     * responsible for having established that the account belongs to one of its own customers
+     * (see InstitutionService).
+     */
+    @Transactional
+    public DebitCard unblock(Account account) {
+        DebitCard card = debitCardRepository.findByAccount_AccountId(account.getAccountId())
+                .orElseThrow(() -> new RuntimeException("No card has been issued for this account"));
+        if (card.getStatus() != CardStatus.BLOCKED) {
+            throw new RuntimeException("This card is not blocked");
+        }
+        card.setStatus(CardStatus.ACTIVE);
+        card.setFailedPinAttempts(0);
         return debitCardRepository.save(card);
     }
 
@@ -147,9 +171,10 @@ public class CardService {
         }
     }
 
-    private String generateUniqueCardNumber() {
+    private String generateUniqueCardNumber(Account account) {
+        String institutionNumber = accountService.institutionNumberOf(account.getInstitution());
         for (int attempt = 0; attempt < MAX_CARD_NUMBER_ATTEMPTS; attempt++) {
-            String candidate = randomCardNumber();
+            String candidate = randomCardNumber(institutionNumber);
             if (!debitCardRepository.existsByCardNumber(candidate)) {
                 return candidate;
             }
@@ -157,11 +182,18 @@ public class CardService {
         throw new RuntimeException("Could not allocate a unique card number");
     }
 
-    /** A 16-digit number whose final digit is the Luhn check digit for the first fifteen. */
-    private String randomCardNumber() {
+    /**
+     * A 16-digit number: a leading 4 (the familiar shape of a card number), then the issuing
+     * institution's bank number — where a real card carries its issuer identification — then
+     * random digits, and finally the Luhn check digit for everything before it.
+     *
+     * The prefix takes the place of random digits rather than being added to them, so the
+     * number stays 16 digits and Luhn-valid exactly as before.
+     */
+    private String randomCardNumber(String institutionNumber) {
         StringBuilder digits = new StringBuilder(CARD_NUMBER_LENGTH);
-        digits.append(4); // A leading 4 is the familiar shape of a card number.
-        for (int i = 1; i < CARD_NUMBER_LENGTH - 1; i++) {
+        digits.append(CARD_LEADING_DIGIT).append(institutionNumber);
+        while (digits.length() < CARD_NUMBER_LENGTH - 1) {
             digits.append(secureRandom.nextInt(10));
         }
         digits.append(luhnCheckDigit(digits.toString()));

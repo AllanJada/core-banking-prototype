@@ -41,6 +41,19 @@ public class FileTransfer {
     @Column(name = "downloaded_at")
     private Instant downloadedAt;
 
+    /** When the recipient approved or rejected this transfer. Null while still SENT. */
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
+    /**
+     * Why the recipient rejected this transfer. Null unless status is REJECTED.
+     *
+     * Required at rejection time (see FileTransferService.reject) — a rejection with no
+     * reason gives the sender nothing to act on and gives an auditor nothing to check.
+     */
+    @Column(name = "rejection_reason", columnDefinition = "TEXT")
+    private String rejectionReason;
+
     /**
      * Unique End-to-End Transaction Reference: the identifier ISO 20022 uses to follow one
      * payment across every institution that touches it.

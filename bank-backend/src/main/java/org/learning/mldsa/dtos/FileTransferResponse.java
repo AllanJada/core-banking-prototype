@@ -33,4 +33,10 @@ public class FileTransferResponse {
      * is one to offer, and the hash is an integrity value the server checks itself.
      */
     private boolean hasPayload;
+
+    /** When the recipient approved or rejected this transfer; null while still SENT. */
+    private Instant reviewedAt;
+
+    /** Why the recipient rejected this transfer; null unless status is REJECTED. */
+    private String rejectionReason;
 }

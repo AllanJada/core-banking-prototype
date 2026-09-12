@@ -8,17 +8,12 @@
   .sheet { padding: 24px 32px; }
 
   .header { text-align: center; margin-bottom: 20px; }
-  .header .logo-placeholder {
-    width: 96px;
-    height: 96px;
-    border-radius: 50%;
-    margin: 0 auto 8px;
-    background-image: url("cardLogo.png");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: cover;
-  }
-  .header h1 { margin: 4px 0; font-size: 20px; }
+  /* The issuing institution names itself in text rather than by emblem: this document is
+     issued by a commercial bank, and a central bank's crest on it would say otherwise.
+     Text also avoids needing a logo asset per licensed institution. */
+  .header .institution { font-size: 17px; font-weight: bold; letter-spacing: 0.4px; }
+  .header .institution-code { font-size: 11px; color: #51606E; margin-top: 2px; }
+  .header h1 { margin: 8px 0 4px; font-size: 20px; }
   .header .period { font-size: 13px; color: #51606E; margin: 2px 0; }
 
   table.info { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
@@ -61,7 +56,11 @@
 <div class="sheet">
 
   <div class="header">
-    <div class="logo-placeholder"></div>
+    <div class="institution" th:text="${statement.institutionName}">Institution name</div>
+    <div class="institution-code"
+         th:text="'Bank code ' + ${statement.institutionCode} + ' · ' + ${statement.institutionNumber}">
+      CODE · 000
+    </div>
     <h1>Account Statement</h1>
     <div class="period">
       <span th:text="${statement.periodFrom}">01 Sep 2026</span>
@@ -97,7 +96,7 @@
     </thead>
     <tbody>
       <tr>
-        <td colspan="4">Opening balance</td>
+        <td colspan="4" align="center">Opening balance</td>
         <td class="amount" th:text="${statement.openingBalance}">0.00</td>
       </tr>
       <tr th:each="line : ${statement.lines}">
@@ -139,12 +138,16 @@
 
   <!-- The signature covers the fields listed below, joined in this order with "|". Printing
        both the covered values and the signature means the document carries everything a
-       verifier needs except the account's public key. -->
+       verifier needs except the issuing institution's public key. -->
   <div class="signature-block">
-    <div class="signature-label">Digitally signed (Ed25519)</div>
+    <div class="signature-label">
+      Digitally signed by <span th:text="${statement.institutionName}">Institution name</span> (Ed25519)
+    </div>
     <div class="signature-covers">
       Covers: account number | period from | period to | opening balance | closing balance |
-      generated at (<span th:text="${statement.generatedAtIso}">2026-09-07T11:45:00Z</span>)
+      generated at (<span th:text="${statement.generatedAtIso}">2026-09-07T11:45:00Z</span>).
+      Verify against the issuing institution's public key; balances as printed, without
+      thousands separators.
     </div>
     <div class="signature-value" th:text="${statement.signature}">signature</div>
   </div>

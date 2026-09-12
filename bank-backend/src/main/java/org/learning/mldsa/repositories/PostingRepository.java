@@ -1,5 +1,6 @@
 package org.learning.mldsa.repositories;
 
+import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.Posting;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -9,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 public interface PostingRepository extends JpaRepository<Posting, Long> {
@@ -58,6 +60,48 @@ public interface PostingRepository extends JpaRepository<Posting, Long> {
             group by p.account.accountId
             """)
     List<AccountBalance> sumBalancesByAccount();
+
+    /**
+     * Balances of just the given accounts — one page of a list rather than every account in
+     * the system. As above, an account with no postings is absent and reads as zero.
+     */
+    @Query("""
+            select new org.learning.mldsa.repositories.AccountBalance(
+                p.account.accountId,
+                coalesce(sum(
+                    case when p.direction = org.learning.mldsa.models.PostingDirection.CREDIT
+                         then p.amount
+                         else -p.amount
+                    end), 0))
+            from Posting p
+            where p.account.accountId in :accountIds
+            group by p.account.accountId
+            """)
+    List<AccountBalance> sumBalancesOf(@Param("accountIds") Collection<Long> accountIds);
+
+    /**
+     * The combined balance of each given institution's accounts of one type: customer funds
+     * held with CUSTOMER, the settlement position with SETTLEMENT.
+     *
+     * This is what lets the Central Bank supervise an institution without seeing its
+     * customers — the sum crosses the identity boundary, the individual balances do not.
+     * An institution with no postings of that type is absent, which callers read as zero.
+     */
+    @Query("""
+            select new org.learning.mldsa.repositories.InstitutionBalance(
+                p.account.institution.userId,
+                coalesce(sum(
+                    case when p.direction = org.learning.mldsa.models.PostingDirection.CREDIT
+                         then p.amount
+                         else -p.amount
+                    end), 0))
+            from Posting p
+            where p.account.type = :type
+              and p.account.institution.userId in :institutionIds
+            group by p.account.institution.userId
+            """)
+    List<InstitutionBalance> sumBalancesPerInstitution(@Param("type") AccountType type,
+                                                       @Param("institutionIds") Collection<Long> institutionIds);
 
     /**
      * Postings falling in a statement period, oldest first, as a statement reads.

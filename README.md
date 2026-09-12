@@ -87,20 +87,25 @@ src
 
 ### Accounts and Access
 
-- Three roles under role-based access control: normal users (retail customers),
-  institutions (file-transfer counterparties), and bank accounts (oversight)
+- Three roles under role-based access control, organised as a two-tier banking system:
+  normal users (retail customers of one institution), institutions (commercial banks),
+  and the Central Bank (supervision)
 - One centralized login screen for all three. The account's role decides which
   dashboard it lands on after signing in, rather than which page it started from —
   the separate "Bank Login" route and the hamburger menu between the two are gone
-- Institutions land on a tabbed dashboard (Inbox / Outbox); bank accounts land on the
-  administration console; normal users land on their personal banking page
-- Accounts are provisioned from the bank role's console (see Admin Console); passwords
+- Institutions land on a tabbed dashboard (Customers / Inbox / Outbox); Central Bank
+  overseers land on the Central Bank console; normal users land on their personal
+  banking page
+- Accounts are provisioned along a chain of custody (see Two-Tier Provisioning); passwords
   are hashed with bcrypt
 - Every account is provisioned with its own Ed25519 key pair at creation time
 
 ### Accounts and Ledger
 
-- Each customer is given an account, with a 16-digit account number, when they register
+- Each customer's institution opens their account, with a 16-digit account number whose
+  first three digits are that institution's own bank number — the way a real account number
+  identifies the bank holding it. The prefix is for people to read; which bank holds an
+  account is a relationship in the data, so nothing routes on those digits
 - Balances are **derived**, not stored: an account has no balance column at all. The
   figure shown is summed from that account's postings whenever it is asked for, so the
   balance and the history it came from cannot disagree
@@ -148,20 +153,25 @@ src
 - Periods are whole UTC days, half-open internally (start inclusive, end exclusive) so
   consecutive statements abut exactly rather than double-counting or missing a posting
   landing on a boundary
-- Each statement is **signed with the account's own key**, over the account number, the
-  period, and the opening and closing balances. The signature and the exact values it
-  covers are printed on the document, so it can be checked against the account's public
-  key using only what is on the page — altering any printed figure leaves a signature that
-  no longer matches. Note this signs the statement's figures, not the rendered bytes: a PDF
-  cannot contain a signature computed from itself, and since the server holds every
-  account's private key it is not proof against this server (the same limitation recorded
-  under Key Custody below)
+- Each statement is **signed with the issuing institution's key**, over the account number,
+  the period, and the opening and closing balances. A statement is a document the bank issues
+  about an account, so the bank is the party attesting to its figures — not the customer. The
+  signature and the exact values it covers are printed on the document, so it can be checked
+  against the institution's public key using only what is on the page; altering any printed
+  figure leaves a signature that no longer matches. Note this signs the statement's figures,
+  not the rendered bytes: a PDF cannot contain a signature computed from itself, and since the
+  server holds every private key it is not proof against this server (the same limitation
+  recorded under Key Custody below)
+- The page is **headed with the institution's name and bank code**, so a customer's statement
+  names the bank that issued it rather than implying the central bank did
 
 ### Debit Cards
 
 - A customer can issue one card against their account, with a 16-digit number distinct from
   the account number and **Luhn-valid**, like a real card, so a mistyped digit fails a
-  checksum instead of addressing some other card
+  checksum instead of addressing some other card. It opens with a 4 and then the issuing
+  institution's bank number, where a real card carries its issuer identification — those
+  digits replace random ones, so the number stays 16 long and still checksums
 - **Cardholders are verified by PIN**, stored as a bcrypt hash exactly like an account
   password. Nothing in the system can read a PIN back — it can only confirm one
 - **No CVV is stored at all.** PCI DSS forbids retaining the card verification value after
@@ -172,7 +182,8 @@ src
   being tried in turn
 - The full card number is returned exactly once, when the card is issued; every later read
   is masked to the last four digits
-- Blocking is one-way for the customer: unblocking is a bank operation
+- Blocking is one-way for the customer: unblocking is done by the customer's own
+  institution, from its dashboard, and by no other bank
 - Cards expire at the end of their month, and EXPIRED is derived from the date rather than
   stored, for the same reason it is on payment links
 
@@ -207,10 +218,41 @@ src
 - An inbox view, scoped to the signed-in account, listing files sent to it
 - An outbox view, scoped to the signed-in account, listing files it has sent and
   each one's current status
-- A status lifecycle for each transfer: SENT when created, DOWNLOADED once the
-  recipient retrieves it
+- A four-state lifecycle per transfer: **SENT** → (**APPROVED** or **REJECTED**) →
+  **DOWNLOADED**. Only SENT is reachable indirectly — every other state follows from an
+  explicit recipient decision (see Transfer Review below)
 - Files are stored on disk under a server-generated identifier, never under their
   original or claimed filename
+
+### Transfer Review
+
+Before a recipient can pick up (download) an incoming transfer, they must preview it and
+explicitly approve or reject it — downloading is no longer something a SENT transfer
+allows directly.
+
+- **The preview is resilient by design.** A structured summary endpoint re-verifies the
+  file's integrity on every call and reports the result in the response body rather than
+  throwing — `integrityValid: false` with a reason, not a failed request — because the
+  point of a review step is to surface exactly this kind of problem to a human, not hide it
+  behind an error page. This had to account for encryption specifically: a corrupted file
+  fails AES-GCM authentication *before* there is any plaintext to hash-compare, so the
+  resilient check wraps that failure too, not just the narrower hash-mismatch case
+- **The payment instruction is parsed, not just linked.** When a transfer carries an ISO
+  20022 payload, the preview reads the actual pain.001 message back out — debtor, creditor,
+  amount, currency, execution date, remittance information — so a reviewer sees what is
+  being paid without reading XML by eye. Parsed fields are only shown when the integrity
+  check passes; content that fails verification is not summarised as fact
+- **The rendered document is available inline**, separately from the structured summary,
+  and unlike the summary it does throw on a failed check — there is no safe way to render a
+  tampered PDF "with a warning attached", so a reviewer is directed back to the resilient
+  summary instead, where the failure is explained
+- **Approval re-verifies at the moment of the decision**, not from a cached result — the
+  file on disk could have changed since an earlier preview, however unlikely, and approving
+  is a claim about this specific document, right now
+- **Rejection requires a reason** and needs no passing integrity check — refusing a
+  transfer is always available, including on one that has already failed to verify
+- Both decisions are terminal and reachable only from SENT: once a transfer is APPROVED,
+  REJECTED, or DOWNLOADED, it cannot be decided again
 
 ### Cryptographic Signing
 
@@ -222,13 +264,16 @@ src
   quantum attacker, and the post-quantum research remains on file if that changes
 - The file's SHA-384 hash, sender, receiver, filename, and timestamp are bound
   together into a signed envelope, not just the file content alone
-- On download, the system independently rehashes the file as it currently exists on
-  disk and re-verifies the signature against the sender's stored public key before
-  serving it. A failed check is recorded and the download is refused
+- The system independently rehashes the file as it currently exists on disk and
+  re-verifies the signature against the sender's stored public key on preview, on
+  approval, and on every download — not just once. A failed check is recorded and the
+  operation that triggered it is refused, except at preview, which reports the failure
+  instead of refusing (see Transfer Review)
 - The inbox and outbox both display the signature status of each transfer, honestly
-  distinguishing a file that has been signed but not yet checked (SIGNED) from one
-  that has actually been re-verified on download (VERIFIED) or has failed
-  verification (INVALID)
+  distinguishing a file that has been signed but not yet reviewed (SIGNED) from one
+  that has actually been re-verified (VERIFIED) or has failed verification (INVALID).
+  Once a transfer reaches APPROVED, verification has necessarily already succeeded —
+  there is no path to that status otherwise
 
 ### Server-Generated Documents
 
@@ -345,32 +390,57 @@ filesystem access can read file contents" gap recorded under the security notes.
 - A file is read fully into memory to be encrypted or decrypted, since GCM authenticates a
   complete message. The multipart upload limit already bounds how large that can be
 
-### Admin Console (Bank Role)
+### Central Bank Console (Bank Role)
 
-Oversight across the platform, restricted to the Bank role at the controller rather than
-per method — every route reads across accounts belonging to other people.
+Supervision across the system, restricted to the Bank role at the controller rather than
+per method.
 
-- **An overview** of what the platform holds, how many accounts and participants exist, and
-  how much is moving. The total held is summed from the ledger on request, not a stored
-  figure, so it cannot drift from the postings it describes
+- **An overview** of what the platform holds, how many customer accounts and participants
+  exist, and how much is moving. The total held is summed from the ledger on request, not a
+  stored figure, so it cannot drift from the postings it describes
 - **Refused payments are shown alongside completed ones, with their reasons.** A console
   that only counted successes would flatter the system; what is being rejected is usually
   the more useful signal
-- **Accounts, payments and transfers** across all participants, including each transfer's
-  signature status and whether it carries an ISO 20022 payload
-- **Read-only, deliberately.** Nothing here adjusts a balance, reverses a payment, or
-  unblocks a card — those would be changes to customers' money made from outside the
-  ledger's own rules. Card numbers are masked and no key or PIN material is exposed
-- Balances and cards for the whole list are each fetched in one query and matched in memory,
-  rather than queried per account — otherwise the page listing everything would get slower
-  exactly as the thing it monitors grows
+- **Institutions as aggregates**: each institution's code, settlement account, customer
+  count, customer funds held and settlement position. It never shows customers' names or
+  individual balances, which stay with their own bank. Each figure is one grouped query for
+  the whole page, not one query per institution
+- **Payments and transfers** across all participants, including each transfer's signature
+  status and whether it carries an ISO 20022 payload
+- **Nothing here touches customers' money.** There is no balance adjustment, payment
+  reversal, card unblock or customer creation. The console's only writes are licensing
+  institutions and adding overseers
 
-**Account provisioning now lives here**, which closes the gap left open earlier. Creating an
-account requires the Bank role, with one exception: while no Bank account exists there is
-nobody who could authorise the first one, so the very first account may be created
-anonymously. That window closes permanently once a Bank account exists. The check lives in
-the service rather than in a route rule because it depends on the database's state, not on
-the request.
+### Two-Tier Provisioning
+
+Every account is created by the tier directly above it, so there is always an identifiable
+party responsible for its existence. This is Phase 1 of
+[`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md).
+
+- **First-time setup.** On an empty system, the sign-in page offers to create the first
+  Central Bank overseer. That is all the anonymous window can create, and a request for any
+  other role is refused. The window closes for good once an overseer exists. The check lives
+  in the service because it depends on the database's state, not on the request
+- **The Central Bank** licenses institutions, each with a unique code of 3–8 letters or
+  digits, and adds overseers. An institution's settlement account is opened in the same
+  transaction
+- **Each institution also gets a three-digit bank number** when it is licensed, which prefixes
+  every account and card number it issues. The letter code is for display; account and card
+  numbers have to stay all-digits (and Luhn-checkable), which is why the numeric code exists
+- **An institution** provisions its own customers from its dashboard. Each customer's
+  account is opened at that institution in the same transaction. The institution comes from
+  the token, never from the request, so no bank can open a customer at another
+- **Separate endpoints per tier** (`/admin/institutions`, `/admin/overseers`,
+  `/institution/customers`), each with a class-level role check, rather than one endpoint
+  whose effect depends on a role field in the body
+- **Tenant scoping.** An institution sees and manages only its own customers, including
+  unblocking a card locked by wrong PINs. Another bank's customer gets "not found", the same
+  answer as an id that doesn't exist, so there is nothing to probe
+- **Customers can't pay settlement accounts.** A settlement account number is refused
+  exactly like an unknown one. Settlement positions will move only through inter-bank
+  settlement (Phase 3)
+- `bank-backend/scripts/verify-two-tier-phase1.sh` runs the plan's negative tests against a
+  running backend on an empty database
 
 ### Pagination
 
@@ -448,10 +518,20 @@ The project was reshaped from a file-transfer system into a core banking system,
 module at a time. Identity and access (roles, centralized login, RBAC), the
 crypto swap to Ed25519, the accounts/ledger foundation, deposits/payments, pay-by-link,
 signed account statements, debit cards, ISO 20022 `pain.001` payloads, at-rest file
-encryption, the bank role's admin console, pagination, and the responsive audit are done.
+encryption, the bank role's admin console, pagination, the responsive audit, and
+inter-institutional transfer review are done.
 
-The core banking pivot's module list is complete. What remains is deployment-stage work and
-the items named below as deliberately out of scope:
+The core banking pivot's module list is complete.
+
+**In progress: two-tier banking.** The Central Bank provisions institutions rather than
+customers, and institutions own their customers. Cross-bank payments will settle through
+institution settlement accounts. The agreed decisions, design, and phased plan are in
+[`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md). Phase 1 (tenancy and the provisioning
+chain) and Phase 2 (institution-signed statements, institution-coded account and card numbers)
+are implemented. Phase 3 (inter-bank settlement and supervision) is not.
+
+Beyond that, what remains is deployment-stage work and the items named below as deliberately
+out of scope:
 
 - A checksum-and-audit trail beyond the signature fields already present
 
@@ -481,7 +561,12 @@ documents rather than duplicated here.
 ## Running the Backend
 
 The backend is built and run using Maven. Database connection details and file
-storage location are configured in `application.properties`. On first run after
+storage location are configured in `application.properties`.
+
+Flyway creates and versions the schema on startup from the migrations in
+`src/main/resources/db/migration`; Hibernate only validates it. A database created before
+Flyway was adopted must be reset (dropped and recreated empty) before the application will
+start against it. On first run after
 adding the PDF generation dependency, Playwright's Chromium browser must be installed
 separately; it is not bundled with the Maven dependency itself.
 

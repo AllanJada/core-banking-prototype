@@ -12,6 +12,7 @@ import {
 } from "@mui/material";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
 import CodeIcon from "@mui/icons-material/CodeOutlined";
+import RateReviewOutlinedIcon from "@mui/icons-material/RateReviewOutlined";
 import type { FileTransfer } from "../types";
 import StatusChip from "./StatusChip";
 import SignatureChip from "./SignatureChip";
@@ -22,6 +23,7 @@ interface TransferTableProps {
   transfers: FileTransfer[];
   onDownload?: (transfer: FileTransfer) => void;
   onDownloadPayload?: (transfer: FileTransfer) => void;
+  onReview?: (transfer: FileTransfer) => void;
   downloadingId?: number | null;
 }
 
@@ -35,6 +37,7 @@ export default function TransferTable({
   transfers,
   onDownload,
   onDownloadPayload,
+  onReview,
   downloadingId,
 }: TransferTableProps) {
   if (transfers.length === 0) {
@@ -84,26 +87,42 @@ export default function TransferTable({
               {mode === "inbox" && (
                 <TableCell align="right">
                   <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
+                    {/* Review is always available — it's the doorway to approve/reject, and
+                        also how a decided transfer's outcome is re-inspected afterwards. */}
                     <Button
                       size="small"
-                      variant="outlined"
-                      startIcon={<DownloadIcon />}
-                      disabled={downloadingId === transfer.transferId}
-                      onClick={() => onDownload?.(transfer)}
+                      variant={transfer.status === "SENT" ? "contained" : "outlined"}
+                      startIcon={<RateReviewOutlinedIcon />}
+                      onClick={() => onReview?.(transfer)}
                     >
-                      {downloadingId === transfer.transferId ? "Downloading…" : "Download"}
+                      Review
                     </Button>
-                    {/* Only for transfers that carry one — a plain file has no payment
-                        instruction to express, so there is nothing to offer. */}
-                    {transfer.hasPayload && (
-                      <Button
-                        size="small"
-                        startIcon={<CodeIcon />}
-                        onClick={() => onDownloadPayload?.(transfer)}
-                        title="ISO 20022 pain.001 payment instruction"
-                      >
-                        XML
-                      </Button>
+                    {/* Download and the payload are gated by the backend on approval, so
+                        they are only offered once that gate would actually let them
+                        through — offering a button that always 400s would be worse than
+                        not offering one. */}
+                    {(transfer.status === "APPROVED" || transfer.status === "DOWNLOADED") && (
+                      <>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<DownloadIcon />}
+                          disabled={downloadingId === transfer.transferId}
+                          onClick={() => onDownload?.(transfer)}
+                        >
+                          {downloadingId === transfer.transferId ? "Downloading…" : "Download"}
+                        </Button>
+                        {transfer.hasPayload && (
+                          <Button
+                            size="small"
+                            startIcon={<CodeIcon />}
+                            onClick={() => onDownloadPayload?.(transfer)}
+                            title="ISO 20022 pain.001 payment instruction"
+                          >
+                            XML
+                          </Button>
+                        )}
+                      </>
                     )}
                   </Stack>
                 </TableCell>

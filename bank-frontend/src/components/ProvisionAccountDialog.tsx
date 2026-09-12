@@ -11,44 +11,54 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { createUser } from "../api/client";
-import type { Role } from "../types";
+import { createInstitution, createOverseer } from "../api/client";
+
+type Kind = "INSTITUTION" | "BANK";
 
 interface ProvisionAccountDialogProps {
   open: boolean;
   onClose: () => void;
-  onProvisioned: (username: string) => void;
+  /** Called with a confirmation to show once the account exists. */
+  onProvisioned: (message: string) => void;
 }
 
-const ROLE_OPTIONS: { value: Role; label: string; hint: string }[] = [
-  { value: "NORMAL_USER", label: "Customer", hint: "Gets a banking account and can hold a card" },
-  { value: "INSTITUTION", label: "Institution", hint: "Exchanges signed documents with other institutions" },
-  { value: "BANK", label: "Bank operator", hint: "Oversight only — can provision accounts" },
+const KIND_OPTIONS: { value: Kind; label: string; hint: string }[] = [
+  {
+    value: "INSTITUTION",
+    label: "Institution",
+    hint: "A commercial bank. Opens and runs its own customers' accounts; its settlement account is opened with it.",
+  },
+  {
+    value: "BANK",
+    label: "Central Bank overseer",
+    hint: "Supervises institutions — can license institutions and add overseers.",
+  },
 ];
 
 /**
- * Creates an account, the one thing the oversight role can change.
+ * The Central Bank's provisioning: institutions, and other overseers.
  *
- * The role picker spells out what each choice grants rather than showing the bare enum
- * name, because the difference between them is what the new account will be able to do —
- * and a customer account also causes a banking account to be opened alongside it.
+ * Customers are deliberately not offered. A customer is opened by their own institution, so
+ * the Central Bank has no path to create one — neither here nor in the API.
  */
 export default function ProvisionAccountDialog({
   open,
   onClose,
   onProvisioned,
 }: ProvisionAccountDialogProps) {
+  const [kind, setKind] = useState<Kind>("INSTITUTION");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("NORMAL_USER");
+  const [institutionCode, setInstitutionCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setKind("INSTITUTION");
     setUsername("");
     setPassword("");
-    setRole("NORMAL_USER");
+    setInstitutionCode("");
     setError(null);
   }, [open]);
 
@@ -57,12 +67,27 @@ export default function ProvisionAccountDialog({
       setError("A username and password are both required.");
       return;
     }
+    if (kind === "INSTITUTION" && !/^[A-Z0-9]{3,8}$/.test(institutionCode.trim())) {
+      setError("The institution code must be 3 to 8 letters or digits.");
+      return;
+    }
 
     setError(null);
     setSubmitting(true);
     try {
-      const created = await createUser(username.trim(), password, role);
-      onProvisioned(created.username);
+      if (kind === "INSTITUTION") {
+        const created = await createInstitution({
+          username: username.trim(),
+          password,
+          institutionCode: institutionCode.trim(),
+        });
+        onProvisioned(
+          `${created.institutionCode} licensed — settlement account ${created.settlementAccountNumber}`
+        );
+      } else {
+        const created = await createOverseer(username.trim(), password);
+        onProvisioned(`Overseer ${created.username} created`);
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the account");
@@ -73,16 +98,43 @@ export default function ProvisionAccountDialog({
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="xs">
-      <DialogTitle>Provision account</DialogTitle>
+      <DialogTitle>Provision</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           {error && <Alert severity="error">{error}</Alert>}
 
           <TextField
+            label="Account type"
+            select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as Kind)}
+            fullWidth
+          >
+            {KIND_OPTIONS.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </TextField>
+          <Typography variant="caption" color="text.secondary">
+            {KIND_OPTIONS.find((option) => option.value === kind)?.hint}
+          </Typography>
+
+          {kind === "INSTITUTION" && (
+            <TextField
+              label="Institution code"
+              value={institutionCode}
+              onChange={(e) => setInstitutionCode(e.target.value.toUpperCase())}
+              helperText="3–8 letters or digits, e.g. ALPHA"
+              slotProps={{ htmlInput: { maxLength: 8 } }}
+              fullWidth
+              required
+            />
+          )}
+          <TextField
             label="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            autoFocus
             fullWidth
             required
           />
@@ -94,22 +146,6 @@ export default function ProvisionAccountDialog({
             fullWidth
             required
           />
-          <TextField
-            label="Role"
-            select
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-            fullWidth
-          >
-            {ROLE_OPTIONS.map((option) => (
-              <MenuItem key={option.value} value={option.value}>
-                {option.label}
-              </MenuItem>
-            ))}
-          </TextField>
-          <Typography variant="caption" color="text.secondary">
-            {ROLE_OPTIONS.find((option) => option.value === role)?.hint}
-          </Typography>
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -117,7 +153,7 @@ export default function ProvisionAccountDialog({
           Cancel
         </Button>
         <Button variant="contained" onClick={handleSubmit} disabled={submitting}>
-          {submitting ? "Creating…" : "Create account"}
+          {submitting ? "Creating…" : kind === "INSTITUTION" ? "License institution" : "Create overseer"}
         </Button>
       </DialogActions>
     </Dialog>
