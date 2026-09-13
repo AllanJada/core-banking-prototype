@@ -50,6 +50,7 @@ public class PaymentService {
     private final DepositRepository depositRepository;
     private final CryptoService cryptoService;
     private final FailedPaymentRecorder failedPaymentRecorder;
+    private final SettlementMessageService settlementMessageService;
 
     @Value("${app.payments.max-per-transaction}")
     private BigDecimal maxPerTransaction;
@@ -182,7 +183,18 @@ public class PaymentService {
         payment.setSignature(signature);
         payment.setCreatedAt(createdAt);
 
-        return paymentRepository.save(payment);
+        Payment saved = paymentRepository.save(payment);
+
+        // The interbank leg: a payment that crossed banks is also an instruction from one bank
+        // to the other, written as an ISO 20022 pacs.008. Inside this same transaction, so
+        // money and the message instructing it commit together — and a message that cannot be
+        // generated or schema-validated takes the payment down with it rather than leaving a
+        // settled transfer nobody can evidence.
+        if (interBank) {
+            settlementMessageService.record(saved, from, to);
+        }
+
+        return saved;
     }
 
     /** A page of payments this account has sent, successful and refused alike, newest first. */

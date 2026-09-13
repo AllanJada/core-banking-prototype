@@ -7,9 +7,14 @@ import org.learning.mldsa.dtos.InstitutionSummaryResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
 import org.learning.mldsa.dtos.PageResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
+import org.learning.mldsa.dtos.SettlementMessageResponse;
+import org.learning.mldsa.models.SettlementMessage;
 import org.learning.mldsa.security.AuthenticatedUser;
 import org.learning.mldsa.services.InstitutionService;
+import org.learning.mldsa.services.SettlementMessageService;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,6 +42,7 @@ import java.util.function.Function;
 public class InstitutionController {
 
     private final InstitutionService institutionService;
+    private final SettlementMessageService settlementMessageService;
 
     /** Creates a customer and opens their account at the calling institution. */
     @PostMapping("/customers")
@@ -68,6 +74,36 @@ public class InstitutionController {
                 Function.identity()));
     }
 
+    /**
+     * The ISO 20022 interbank messages this institution is a party to, sent and received.
+     *
+     * Both directions, and only those two: a message between two other banks is not this
+     * institution's to read.
+     */
+    @GetMapping("/settlement-messages")
+    ResponseEntity<PageResponse<SettlementMessageResponse>> settlementMessages(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @AuthenticationPrincipal AuthenticatedUser institution
+    ) {
+        return ResponseEntity.ok(PageResponse.of(
+                settlementMessageService.listForInstitution(institution.userId(), PageRequestParams.of(page, size)),
+                Function.identity()));
+    }
+
+    /**
+     * The pacs.008 itself, re-verified before it is served: its stored bytes must still hash
+     * to what was signed, and that signature must still verify against the sending bank's key.
+     */
+    @GetMapping("/settlement-messages/{messageId}/xml")
+    ResponseEntity<byte[]> settlementMessageXml(
+            @PathVariable Long messageId,
+            @AuthenticationPrincipal AuthenticatedUser institution
+    ) {
+        SettlementMessage message = settlementMessageService.requireForInstitution(messageId, institution.userId());
+        return xmlResponse(message, settlementMessageService.loadVerified(message));
+    }
+
     @GetMapping("/customers")
     ResponseEntity<PageResponse<CustomerResponse>> customers(
             @RequestParam(required = false) Integer page,
@@ -93,5 +129,14 @@ public class InstitutionController {
             @AuthenticationPrincipal AuthenticatedUser institution
     ) {
         return ResponseEntity.ok(institutionService.unblockCard(institution.userId(), customerId));
+    }
+
+    /** Served as a file named after the reference it carries, which is also the ledger's. */
+    static ResponseEntity<byte[]> xmlResponse(SettlementMessage message, byte[] xml) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_XML)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + message.getMessageType() + "-" + message.getUetr() + ".xml\"")
+                .body(xml);
     }
 }

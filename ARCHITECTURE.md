@@ -16,7 +16,8 @@ individual decisions; read this for the *shape* of the whole.
 
 A small core banking system, evolved from a file-transfer demonstration between
 financial institutions and now organised as a two-tier banking system
-(`TWO_TIER_BANKING_PLAN.md`, Phase 1 implemented). Three account roles share one platform:
+(`TWO_TIER_BANKING_PLAN.md`, all three phases implemented). Three account roles share one
+platform:
 
 - **Normal User** — a retail banking customer of exactly one institution: an account, a
   debit card, deposits, payments, pay-by-link, statements.
@@ -114,14 +115,14 @@ database:
 |---|---|---|
 | `identity` | `users` | Identity & Access |
 | `ledger` | `accounts`, `postings` | Ledger |
-| `payments` | `deposits`, `payments`, `payment_links` | Payments |
+| `payments` | `deposits`, `payments`, `payment_links`, `settlement_messages` | Payments |
 | `cards` | `debit_cards` | Card Services |
 | `filetransfer` | `file_transfers` | File Transfer & Review |
 
 The schema is owned by Flyway migrations in `resources/db/migration`. The baseline,
 `V1__baseline_schema.sql`, also creates the five schemas; `V2__institution_numbers.sql` adds
-institutions' bank numbers, and `V3__settlement_failure_detail.sql` the column holding why a
-bank could not settle. Hibernate runs with
+institutions' bank numbers, `V3__settlement_failure_detail.sql` the column holding why a bank
+could not settle, and `V4__settlement_messages.sql` the interbank messages table. Hibernate runs with
 `ddl-auto=validate`: at startup it checks the entities against the migrated schema and
 changes nothing. Flyway was adopted at the two-tier reset, after `ddl-auto=update` had
 already caused a real bug (§9.2).
@@ -153,6 +154,13 @@ User (identity.users)
   │          │          ├─ cardNumber: 16-digit, Luhn-valid
   │          │          ├─ pinHash: bcrypt — no plaintext PIN, ever
   │          │          └─ failedPinAttempts, status (ACTIVE|BLOCKED), expiresOn
+  │          │
+  │          │
+  │          │   Payment ──0..1── SettlementMessage (payments.settlement_messages)
+  │          │                      one per inter-bank payment, none within a bank
+  │          │                      ├─ uetr: the payment's own transactionRef
+  │          │                      ├─ debtor/creditorAgent → User [INSTITUTION]
+  │          │                      └─ storedFilename, xmlHash, signature
   │          │
   │          ├──1:N── Deposit (payments.deposits)
   │          ├──1:N── Payment (payments.payments)  [as fromAccount or toAccount]
@@ -398,6 +406,22 @@ two cannot drift apart because they're compiled from the same input.
   info — for the review module (§8). Assumes the bytes are already trustworthy; the
   caller is responsible for verifying integrity first.
 
+**`Pacs008GenerationService` and `SettlementMessageService`** are the interbank counterpart,
+generating `pacs.008.001.08` from its own official XSD (a second `xjc` execution, its own
+package, its own staleFile). The distinction between the two messages is the point of having
+both: `pain.001` is what a customer sends their own bank to initiate a transfer, `pacs.008` is
+what that bank sends the receiving bank to settle it — which this system only needed once
+payments began crossing institutions.
+
+One message is written per inter-bank payment, inside that payment's own transaction, in the
+order every signed artefact here follows: generate, schema-validate, canonicalise, hash, sign
+(by the sending bank), store encrypted, record. A message that cannot be generated or
+validated aborts the payment rather than leaving settled money with no instruction behind it.
+`SettlementMessageService.loadVerified` re-hashes and re-verifies before serving, rebuilding
+the envelope from values persisted with the message rather than from the banks' current state.
+Settlement method is `CLRG`: both banks settle across the Central Bank, not on either agent's
+own books.
+
 ### 6.7 Supervision (`AdminService`) and Institutions (`InstitutionService`)
 
 `AdminService` is read-only. What the `BANK` role can create (institutions and overseers)
@@ -450,6 +474,7 @@ what issues a statement about an account (§6.4).
 | `buildPaymentEnvelope` | fromAccount, toAccount, amount, timestamp | Payments |
 | `buildDepositEnvelope` | account, amount, timestamp | Deposits |
 | `buildStatementEnvelope` | account, period, opening+closing balance, generatedAt | Statements |
+| `buildSettlementMessageEnvelope` | uetr, both agents' codes, amount, xmlHash, createdAt | Interbank pacs.008 messages |
 
 `buildCombinedEnvelope` exists as a **separate** method rather than an evolution of
 `buildEnvelope`, specifically so a transfer without a payload still rebuilds the exact
@@ -682,7 +707,10 @@ built, not assumed correct from reading the code:
   tenancy and provisioning refusals of §5.4), `verify-two-tier-phase2.sh` (institution-signed
   statements and bank-numbered account/card numbers, verified outside the application),
   `verify-two-tier-phase3.sh` (a mixed intra/inter workload, the net debit cap, a concurrent
-  pair of inter-bank payments, and invariants I1–I5 in SQL), and
+  pair of inter-bank payments, and invariants I1–I5 in SQL),
+  `verify-iso20022-pacs008.sh` (the interbank message validated against the official schema
+  and its signature verified outside the application, plus who may read it and what happens
+  when a stored message is tampered with), and
   `bank-frontend/scripts/verify-two-tier-ui.mjs` (the same hierarchy built through a real
   browser).
 - **Independent validation**: the generated ISO 20022 payload was validated with

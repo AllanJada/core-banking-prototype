@@ -104,9 +104,35 @@ export interface SettlementPosition {
   headroom: number;
 }
 
+/**
+ * An ISO 20022 pacs.008: the instruction one bank sent another to settle a payment.
+ *
+ * The XML is fetched separately, so that serving it can re-check its hash and signature
+ * first — a list cannot promise what it has not verified.
+ */
+export interface SettlementMessage {
+  messageId: number;
+  paymentId: number;
+  /** Also the ledger's transaction reference for the payment's four postings. */
+  uetr: string;
+  messageType: string;
+  debtorAgentName: string;
+  debtorAgentCode: string;
+  creditorAgentName: string;
+  creditorAgentCode: string;
+  amount: number;
+  currency: string;
+  xmlHash: string;
+  createdAt: string;
+  /** SENT or RECEIVED for an institution; null for the Central Bank. */
+  direction: "SENT" | "RECEIVED" | null;
+}
+
 /** One bank-to-bank movement. Carries no customer identity on either side. */
 export interface SettlementMovement {
   paymentId: number;
+  /** The pacs.008 instructing it, to fetch it by. */
+  messageId: number | null;
   transactionRef: string;
   fromInstitutionName: string;
   fromInstitutionCode: string;

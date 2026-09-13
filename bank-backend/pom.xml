@@ -162,13 +162,34 @@
                         <goals>
                             <goal>xjc</goal>
                         </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/resources/iso20022/pain.001.001.09.xsd</source>
+                            </sources>
+                            <packageName>org.learning.mldsa.iso20022.pain001</packageName>
+                            <staleFile>${project.build.directory}/jaxb2/.pain001-staleFlag</staleFile>
+                        </configuration>
+                    </execution>
+                    <!-- The interbank leg. pain.001 is what a customer sends their own bank;
+                         pacs.008 is what that bank sends the receiving bank, which is the
+                         message this system needs now that payments settle between
+                         institutions. Each execution needs its own staleFile, or the second
+                         one is skipped because the first has already marked generation done. -->
+                    <execution>
+                        <id>generate-pacs008</id>
+                        <goals>
+                            <goal>xjc</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>src/main/resources/iso20022/pacs.008.001.08.xsd</source>
+                            </sources>
+                            <packageName>org.learning.mldsa.iso20022.pacs008</packageName>
+                            <staleFile>${project.build.directory}/jaxb2/.pacs008-staleFlag</staleFile>
+                        </configuration>
                     </execution>
                 </executions>
                 <configuration>
-                    <sources>
-                        <source>src/main/resources/iso20022/pain.001.001.09.xsd</source>
-                    </sources>
-                    <packageName>org.learning.mldsa.iso20022.pain001</packageName>
                     <clearOutputDir>false</clearOutputDir>
                 </configuration>
             </plugin>

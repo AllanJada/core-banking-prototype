@@ -8,18 +8,22 @@ import org.learning.mldsa.dtos.InstitutionResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
 import org.learning.mldsa.dtos.PageResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
+import org.learning.mldsa.dtos.SettlementMessageResponse;
 import org.learning.mldsa.dtos.SettlementRefusalResponse;
 import org.learning.mldsa.dtos.SettlementResponse;
 import org.learning.mldsa.dtos.UserResponse;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.FileTransfer;
+import org.learning.mldsa.models.SettlementMessage;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.services.AdminService;
+import org.learning.mldsa.services.SettlementMessageService;
 import org.learning.mldsa.services.UserService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -48,6 +52,7 @@ public class AdminController {
 
     private final AdminService adminService;
     private final UserService userService;
+    private final SettlementMessageService settlementMessageService;
 
     /** Platform totals, including how much is being refused rather than only what succeeds. */
     @GetMapping("/summary")
@@ -105,6 +110,29 @@ public class AdminController {
             @RequestParam(required = false) Integer size
     ) {
         return ResponseEntity.ok(adminService.settlement(PageRequestParams.of(page, size)));
+    }
+
+    /**
+     * Every ISO 20022 interbank message, as settlement operator.
+     *
+     * The Central Bank sees both sides of each instruction — it is the system the money
+     * settles across — where an institution sees only its own.
+     */
+    @GetMapping("/settlement/messages")
+    ResponseEntity<PageResponse<SettlementMessageResponse>> settlementMessages(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return ResponseEntity.ok(PageResponse.of(
+                settlementMessageService.listAll(PageRequestParams.of(page, size)),
+                Function.identity()));
+    }
+
+    /** The pacs.008 itself, hash and signature re-checked before it is served. */
+    @GetMapping("/settlement/messages/{messageId}/xml")
+    ResponseEntity<byte[]> settlementMessageXml(@PathVariable Long messageId) {
+        SettlementMessage message = settlementMessageService.require(messageId);
+        return InstitutionController.xmlResponse(message, settlementMessageService.loadVerified(message));
     }
 
     /** Payments a bank could not settle, with the cause its customer was not given. */

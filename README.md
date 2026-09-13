@@ -16,6 +16,16 @@ non-repudiation, because this server holds every account's private key (see Key 
 and its encryption and signing keys come from configuration rather than a managed key
 store. Both are recorded below rather than left to be discovered.
 
+Companion documents sit beside this one:
+
+| Document | What it covers |
+|---|---|
+| [`FLOWS.md`](FLOWS.md) | Each flow step by step and what every step is *for* — plus where zero-knowledge proofs would fit if they were added |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The shape of the whole system at once: request path, data model, security model |
+| [`DATABASE-SCHEMA.md`](DATABASE-SCHEMA.md) | Every table and column, the DDL to create them, and the invariant queries |
+| [`REMAINING-WORK.md`](REMAINING-WORK.md) | What is missing or wrong, honestly — including defects that can lose money today |
+| [`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md) | The two-tier restructure and the decisions behind it |
+
 ## Tech Stack
 
 ### Backend
@@ -159,6 +169,9 @@ src
   for one: the paying bank's settlement account is locked before its position is read. Only
   the debited side is locked, so two banks paying each other at the same moment cannot
   deadlock
+- **Each inter-bank payment also produces an ISO 20022 `pacs.008`** — the instruction the
+  paying bank sends the receiving one — written in the same transaction as the money it moves
+  (see ISO 20022 `pacs.008` Interbank Messages)
 - The invariants (positions always sum to zero, every payment's postings net to zero, an
   intra-bank payment never touches settlement) are **checked in SQL against the running
   database** by `bank-backend/scripts/verify-two-tier-phase3.sh`, and the zero-sum check is
@@ -348,6 +361,35 @@ generated beside it, from the same data, under one signature.
   no counterpart in the standard and stays on the PDF, with a short unstructured remittance
   line carrying the pay period. Structured remittance models invoices and creditor
   references, so forcing payroll into it would be a misuse rather than a mapping
+
+### ISO 20022 `pacs.008` Interbank Messages
+
+A `pain.001` is what a customer sends their own bank to *initiate* a transfer. A `pacs.008` is
+what that bank then sends the receiving bank to *settle* it. The system had no use for the
+second until payments started crossing institutions.
+
+- **Every inter-bank payment writes one**, and a payment inside a single bank writes none —
+  nothing crosses an institution, so there is no bank to instruct
+- **Generated from the official ISO schema**, like `pain.001`: the XSD is in the repo, JAXB
+  generates the binding classes from it at build time, and the same file validates the output
+- **Written inside the payment's own transaction**, so money and the instruction that moved it
+  commit together. A message that cannot be generated or schema-validated takes the payment
+  down with it, rather than leaving a settled transfer nobody can evidence
+- **Settlement method is `CLRG`** — both banks hold settlement accounts at the Central Bank and
+  the money moves between them there, which is settlement through a clearing system rather
+  than across either agent's own books
+- **The message's UETR is the ledger's own transaction reference**, the same one tying the
+  payment's four postings together, so the instruction and the money it moved share one
+  identifier rather than two that could disagree
+- **Signed by the sending bank** and stored encrypted. Downloading re-hashes the stored bytes
+  against what was signed and re-checks the signature, so a tampered message is refused rather
+  than served
+- **Only the two banks party to it can read it**, plus the Central Bank as settlement operator.
+  A third bank asking gets "not found", and customers have no access at all — this is an
+  interbank message, not a customer document
+- `bank-backend/scripts/verify-iso20022-pacs008.sh` validates a generated message against the
+  official schema and verifies its signature **outside the application**, with `lxml` and
+  `cryptography`
 
 ### ISO 20022 Data Model (Phase 1)
 
@@ -556,7 +598,8 @@ customers, and institutions own their customers. Cross-bank payments will settle
 institution settlement accounts. The agreed decisions, design, and phased plan are in
 [`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md). **All three phases are implemented**:
 tenancy and the provisioning chain, institution-signed statements with institution-coded
-account and card numbers, and inter-bank settlement with supervision.
+account and card numbers, and inter-bank settlement with supervision. The plan's follow-up
+`pacs.008` interbank message is implemented too.
 
 Beyond that, what remains is deployment-stage work and the items named below as deliberately
 out of scope:

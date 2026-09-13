@@ -20,10 +20,12 @@ import {
   Toolbar,
   Typography,
 } from "@mui/material";
+import DownloadIcon from "@mui/icons-material/DownloadOutlined";
 import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
 import { useNavigate } from "react-router-dom";
 import {
+  downloadAdminSettlementMessage,
   getAdminInstitutions,
   getAdminSettlement,
   getAdminSettlementRefusals,
@@ -130,6 +132,14 @@ export default function BankDashboardPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  async function handleDownloadMessage(messageId: number, uetr: string) {
+    try {
+      await downloadAdminSettlementMessage(messageId, uetr);
+    } catch (err) {
+      setSnackbar(err instanceof Error ? err.message : "Could not download the settlement message");
+    }
+  }
 
   function handleLogout() {
     logout();
@@ -366,12 +376,13 @@ export default function BankDashboardPage() {
                           <TableCell>To bank</TableCell>
                           <TableCell align="right">Amount</TableCell>
                           <TableCell>Reference</TableCell>
+                          <TableCell>Instruction</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {movements.items.length === 0 && !movements.loading && (
                           <TableRow>
-                            <TableCell colSpan={5}>
+                            <TableCell colSpan={6}>
                               <Typography variant="body2" color="text.secondary">
                                 No inter-bank payments yet. Payments within one bank never touch
                                 settlement.
@@ -389,6 +400,23 @@ export default function BankDashboardPage() {
                             </TableCell>
                             <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>
                               {movement.transactionRef?.slice(0, 8)}
+                            </TableCell>
+                            <TableCell>
+                              {/* The ISO 20022 message the paying bank sent the receiving one.
+                                  Re-verified server-side before it is served. */}
+                              {movement.messageId ? (
+                                <Button
+                                  size="small"
+                                  startIcon={<DownloadIcon />}
+                                  onClick={() => handleDownloadMessage(movement.messageId!, movement.transactionRef)}
+                                >
+                                  pacs.008
+                                </Button>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                  —
+                                </Typography>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
