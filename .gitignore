@@ -71,3 +71,6 @@ pids
 
 # Optional eslint cache
 .eslintcache
+
+# Local storage
+bank-backend/storage

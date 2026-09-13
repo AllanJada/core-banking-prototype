@@ -1,8 +1,13 @@
 import { Chip } from "@mui/material";
 import type { TransferStatus } from "../types";
 
-const STATUS_CONFIG: Record<TransferStatus, { label: string; color: "warning" | "success" }> = {
-  SENT: { label: "Awaiting pickup", color: "warning" },
+const STATUS_CONFIG: Record<
+  TransferStatus,
+  { label: string; color: "warning" | "success" | "error" | "info" }
+> = {
+  SENT: { label: "Awaiting review", color: "warning" },
+  APPROVED: { label: "Approved", color: "info" },
+  REJECTED: { label: "Rejected", color: "error" },
   DOWNLOADED: { label: "Received", color: "success" },
 };
 

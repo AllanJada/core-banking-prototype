@@ -7,11 +7,15 @@ import type { FileTransfer } from "../types";
 
 /**
  * Deliberately distinguishes "Signed" from "Verified" rather than showing one generic
- * "secure" badge: the backend only actually re-checks a signature against the sender's
- * public key when the recipient downloads the file (FileTransferService.downloadFile).
- * Before that happens, all we know is that a signature was attached at send time — not
- * that anyone has confirmed it's valid. Claiming "Verified" earlier than that would be
- * a claim this system hasn't actually earned yet.
+ * "secure" badge: the backend re-checks a signature against the sender's public key on
+ * review (preview/approve) and again on download, not before. While a transfer is still
+ * SENT, all we know is that a signature was attached at send time — not that anyone has
+ * confirmed it's valid. Claiming "Verified" earlier than that would be a claim this system
+ * hasn't actually earned yet.
+ *
+ * APPROVED and later statuses always show the verified/invalid distinction rather than
+ * "Signed", because approving a transfer requires the integrity check to have passed —
+ * there is no path to APPROVED with an unverified signature.
  */
 export default function SignatureChip({ transfer }: { transfer: FileTransfer }) {
   const hasSignature = Boolean(transfer.signature && transfer.fileHash);

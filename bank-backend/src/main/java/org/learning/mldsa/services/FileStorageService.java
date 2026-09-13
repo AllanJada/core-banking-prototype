@@ -1,16 +1,14 @@
 package org.learning.mldsa.services;
 
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 
 /**
@@ -19,13 +17,22 @@ import java.util.UUID;
  * Deliberately never trusts a client-supplied filename as a storage path (path traversal /
  * overwrite risk) — every file is stored under a server-generated UUID name. The original
  * filename is kept only as metadata (see FileTransfer.originalFilename) for display purposes.
+ *
+ * Content is encrypted on the way to disk and decrypted on the way back, so callers only
+ * ever see plaintext. Confining encryption to this one class is what keeps it invisible to
+ * everything else: hashes and signatures are computed over plaintext held in memory before
+ * a file is ever written, and re-verification reads plaintext back, so introducing
+ * encryption changed neither and every signature issued beforehand remains valid.
  */
 @Service
 public class FileStorageService {
 
     private final Path storageRoot;
+    private final FileEncryptionService fileEncryptionService;
 
-    public FileStorageService(@Value("${app.file-storage-path}") String storagePath) {
+    public FileStorageService(@Value("${app.file-storage-path}") String storagePath,
+                              FileEncryptionService fileEncryptionService) {
+        this.fileEncryptionService = fileEncryptionService;
         this.storageRoot = Path.of(storagePath).toAbsolutePath().normalize();
         try {
             Files.createDirectories(storageRoot);
@@ -73,34 +80,53 @@ public class FileStorageService {
         String extension = extractExtension(originalFilename);
         String storedFilename = UUID.randomUUID() + extension;
 
-        Path target = storageRoot.resolve(storedFilename).normalize();
+        Path target = resolveInsideRoot(storedFilename, "Invalid storage path");
 
-        // Defense in depth: even though storedFilename is always our own UUID, confirm it
-        // still resolves inside storageRoot before writing.
-        if (!target.getParent().equals(storageRoot)) {
-            throw new RuntimeException("Invalid storage path");
-        }
+        // Read fully, then encrypt: AES-GCM authenticates the whole message, so it works on
+        // a complete buffer rather than a stream. That caps a stored file at what fits in
+        // memory, which the multipart upload limit already bounds.
+        byte[] plaintext = inputStream.readAllBytes();
+        Files.write(target, fileEncryptionService.encrypt(plaintext));
 
-        Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
         return storedFilename;
     }
 
+    /**
+     * Loads a stored file's plaintext.
+     *
+     * Returns the decrypted bytes in memory rather than a handle to the file on disk, since
+     * what is on disk is ciphertext and no caller wants that. Files written before
+     * encryption existed are still plaintext and are passed through unchanged — see
+     * FileEncryptionService.decrypt.
+     */
     public Resource loadAsResource(String storedFilename) {
+        Path filePath = resolveInsideRoot(storedFilename, "Invalid file reference");
+
+        if (!Files.isReadable(filePath)) {
+            throw new RuntimeException("File not found on disk: " + storedFilename);
+        }
+
         try {
-            Path filePath = storageRoot.resolve(storedFilename).normalize();
-
-            if (!filePath.getParent().equals(storageRoot)) {
-                throw new RuntimeException("Invalid file reference");
-            }
-
-            Resource resource = new UrlResource(filePath.toUri());
-            if (!resource.exists() || !resource.isReadable()) {
-                throw new RuntimeException("File not found on disk: " + storedFilename);
-            }
-            return resource;
-        } catch (MalformedURLException e) {
+            byte[] stored = Files.readAllBytes(filePath);
+            return new ByteArrayResource(fileEncryptionService.decrypt(stored));
+        } catch (IOException e) {
             throw new RuntimeException("Failed to load file: " + storedFilename, e);
         }
+    }
+
+    /**
+     * Resolves a stored name inside the storage root.
+     *
+     * Defence in depth: the name is always a UUID this service generated, but confirming it
+     * still lands inside the root costs nothing and means a future caller passing something
+     * else cannot escape the directory.
+     */
+    private Path resolveInsideRoot(String storedFilename, String message) {
+        Path filePath = storageRoot.resolve(storedFilename).normalize();
+        if (!filePath.getParent().equals(storageRoot)) {
+            throw new RuntimeException(message);
+        }
+        return filePath;
     }
 
     // Only keeps a short, extension-like suffix (e.g. ".pdf") — never any path separators.

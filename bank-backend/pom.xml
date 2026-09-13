@@ -31,11 +31,6 @@
     </properties>
     <dependencies>
         <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.85.2</version>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
@@ -45,13 +40,46 @@
             <version>1.62.0</version>
         </dependency>
         <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcpkix-jdk18on</artifactId>
-            <version>1.85</version>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <!-- JAXB, for binding the official ISO 20022 pain.001 schema to generated Java
+             classes. Not part of the JDK since Java 11, so both the API and an
+             implementation have to be declared explicitly. -->
+        <dependency>
+            <groupId>jakarta.xml.bind</groupId>
+            <artifactId>jakarta.xml.bind-api</artifactId>
+            <version>4.0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.jaxb</groupId>
+            <artifactId>jaxb-runtime</artifactId>
+            <version>4.0.5</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- JWT issuing/verification for the centralized login (see security package).
+             jjwt splits into a compile-time API and two runtime-only implementations —
+             only jjwt-api belongs on the compile classpath. -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- jjwt needs its own JSON serializer. Gson rather than jjwt-jackson on purpose:
+             Spring Boot 4 uses Jackson 3 (tools.jackson), while jjwt-jackson targets
+             Jackson 2 (com.fasterxml.jackson) — pairing them would put two Jackson majors
+             on the classpath with identically-named ObjectMapper classes. -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-gson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -70,6 +98,18 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <!-- Schema migrations. The schema is owned by versioned SQL under db/migration rather
+             than generated from the entities, because ddl-auto=update never revises a
+             constraint once created (see ARCHITECTURE.md §9.2). Postgres support is a
+             separate module since Flyway 10. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -102,6 +142,35 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- Generates Java classes from the official pain.001.001.09 schema at build
+                 time, rather than anyone hand-writing XML. The schema is the source of
+                 truth: if it changes, the classes change and the compiler finds every
+                 mapping that no longer fits.
+
+                 The XSD deliberately lives under src/main/resources so the same file is
+                 also on the runtime classpath — the pre-send validation gate validates
+                 against the very schema these classes were generated from, so the two can
+                 never drift apart. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>jaxb2-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-pain001</id>
+                        <goals>
+                            <goal>xjc</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <sources>
+                        <source>src/main/resources/iso20022/pain.001.001.09.xsd</source>
+                    </sources>
+                    <packageName>org.learning.mldsa.iso20022.pain001</packageName>
+                    <clearOutputDir>false</clearOutputDir>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -14,14 +14,13 @@ import {
 } from "@mui/material";
 import UploadIcon from "@mui/icons-material/UploadFileOutlined";
 import VisibilityIcon from "@mui/icons-material/VisibilityOutlined";
-import { listUsers, sendFile } from "../api/client";
+import { listCounterparties, sendFile } from "../api/client";
 import type { User } from "../types";
 
 interface SendFileDialogProps {
   open: boolean;
   onClose: () => void;
   onSent: () => void;
-  currentUser: User;
 }
 
 function isPdf(file: File): boolean {
@@ -32,7 +31,6 @@ export default function SendFileDialog({
   open,
   onClose,
   onSent,
-  currentUser,
 }: SendFileDialogProps) {
   const [recipients, setRecipients] = useState<User[]>([]);
   const [receiverId, setReceiverId] = useState<number | "">("");
@@ -50,10 +48,10 @@ export default function SendFileDialog({
     setError(null);
     setShowPreview(false);
 
-    listUsers()
-      .then((users) => setRecipients(users.filter((u) => u.userId !== currentUser.userId)))
+    listCounterparties()
+      .then(setRecipients)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load recipients"));
-  }, [open, currentUser.userId]);
+  }, [open]);
 
   // The selected file never leaves the browser at this point — the preview is
   // rendered straight from the local File object via a blob URL, no upload
@@ -77,7 +75,7 @@ export default function SendFileDialog({
     setError(null);
     setSubmitting(true);
     try {
-      await sendFile(currentUser.userId, receiverId, file);
+      await sendFile(receiverId, file);
       onSent();
       onClose();
     } catch (err) {

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Account Statement</title>
+<style>
+  body { font-family: "Arial", sans-serif; margin: 0; padding: 0; color: #16202A; }
+  .sheet { padding: 24px 32px; }
+
+  .header { text-align: center; margin-bottom: 20px; }
+  /* The issuing institution names itself in text rather than by emblem: this document is
+     issued by a commercial bank, and a central bank's crest on it would say otherwise.
+     Text also avoids needing a logo asset per licensed institution. */
+  .header .institution { font-size: 17px; font-weight: bold; letter-spacing: 0.4px; }
+  .header .institution-code { font-size: 11px; color: #51606E; margin-top: 2px; }
+  .header h1 { margin: 8px 0 4px; font-size: 20px; }
+  .header .period { font-size: 13px; color: #51606E; margin: 2px 0; }
+
+  table.info { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
+  table.info td { padding: 4px 8px; }
+  table.info td.label { color: #51606E; width: 130px; }
+
+  table.lines { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.lines th, table.lines td { border: 1px solid #ddd; padding: 6px 8px; }
+  table.lines th { background: #F4F6F8; text-align: left; }
+  table.lines td.amount, table.lines th.amount { text-align: right; white-space: nowrap; }
+  /* Repeat the column headings when a long statement breaks across pages. */
+  table.lines thead { display: table-header-group; }
+  table.lines tr { page-break-inside: avoid; }
+
+  .summary { margin-top: 16px; width: 100%; border-collapse: collapse; font-size: 13px; }
+  .summary td { padding: 5px 8px; }
+  .summary td.label { color: #51606E; }
+  .summary td.value { text-align: right; white-space: nowrap; }
+  .summary tr.total td { font-weight: bold; border-top: 1px solid #333; }
+
+  .empty { padding: 18px 8px; font-size: 13px; color: #51606E; text-align: center; }
+  .footer { margin-top: 28px; font-size: 11px; color: #51606E; text-align: center; }
+
+  .signature-block {
+    margin-top: 14px;
+    padding: 8px 10px;
+    border: 1px solid #E1E6EA;
+    border-radius: 4px;
+    font-size: 9px;
+    color: #51606E;
+    page-break-inside: avoid;
+  }
+  .signature-block .signature-label { font-weight: bold; color: #16202A; }
+  .signature-block .signature-covers { margin: 2px 0 4px; }
+  /* Wraps rather than overflowing: a Base64 signature is one long unbroken token. */
+  .signature-block .signature-value { font-family: "Courier New", monospace; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="header">
+    <div class="institution" th:text="${statement.institutionName}">Institution name</div>
+    <div class="institution-code"
+         th:text="'Bank code ' + ${statement.institutionCode} + ' · ' + ${statement.institutionNumber}">
+      CODE · 000
+    </div>
+    <h1>Account Statement</h1>
+    <div class="period">
+      <span th:text="${statement.periodFrom}">01 Sep 2026</span>
+      &ndash;
+      <span th:text="${statement.periodTo}">30 Sep 2026</span>
+    </div>
+  </div>
+
+  <table class="info">
+    <tr>
+      <td class="label">Account holder</td>
+      <td th:text="${statement.accountHolder}">Name</td>
+      <td class="label">Account number</td>
+      <td th:text="${statement.accountNumber}">0000000000000000</td>
+    </tr>
+    <tr>
+      <td class="label">Currency</td>
+      <td th:text="${statement.currency}">TZS</td>
+      <td class="label">Generated</td>
+      <td th:text="${statement.generatedAt}">01 Oct 2026 09:00 UTC</td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Description</th>
+        <th class="amount">Debit</th>
+        <th class="amount">Credit</th>
+        <th class="amount">Balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colspan="4" align="center">Opening balance</td>
+        <td class="amount" th:text="${statement.openingBalance}">0.00</td>
+      </tr>
+      <tr th:each="line : ${statement.lines}">
+        <td th:text="${line.date}">01 Sep 2026</td>
+        <td th:text="${line.description}">Description</td>
+        <td class="amount" th:text="${line.debit}"></td>
+        <td class="amount" th:text="${line.credit}"></td>
+        <td class="amount" th:text="${line.balance}">0.00</td>
+      </tr>
+      <tr th:if="${statement.lines.isEmpty()}">
+        <td colspan="5" class="empty">No transactions in this period.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="summary">
+    <tr>
+      <td class="label">Opening balance</td>
+      <td class="value" th:text="${statement.openingBalance}">0.00</td>
+    </tr>
+    <tr>
+      <td class="label">Total paid in</td>
+      <td class="value" th:text="${statement.totalCredits}">0.00</td>
+    </tr>
+    <tr>
+      <td class="label">Total paid out</td>
+      <td class="value" th:text="${statement.totalDebits}">0.00</td>
+    </tr>
+    <tr class="total">
+      <td class="label">Closing balance</td>
+      <td class="value" th:text="${statement.closingBalance}">0.00</td>
+    </tr>
+  </table>
+
+  <div class="footer">
+    This statement is generated from the account's posting history. Amounts are shown in
+    <span th:text="${statement.currency}">TZS</span>.
+  </div>
+
+  <!-- The signature covers the fields listed below, joined in this order with "|". Printing
+       both the covered values and the signature means the document carries everything a
+       verifier needs except the issuing institution's public key. -->
+  <div class="signature-block">
+    <div class="signature-label">
+      Digitally signed by <span th:text="${statement.institutionName}">Institution name</span> (Ed25519)
+    </div>
+    <div class="signature-covers">
+      Covers: account number | period from | period to | opening balance | closing balance |
+      generated at (<span th:text="${statement.generatedAtIso}">2026-09-07T11:45:00Z</span>).
+      Verify against the issuing institution's public key; balances as printed, without
+      thousands separators.
+    </div>
+    <div class="signature-value" th:text="${statement.signature}">signature</div>
+  </div>
+
+</div>
+</body>
+</html>

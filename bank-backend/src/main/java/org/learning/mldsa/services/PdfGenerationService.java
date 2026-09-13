@@ -6,30 +6,23 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.Margin;
 import org.learning.mldsa.dtos.SlipRequest;
+import org.learning.mldsa.dtos.StatementDocument;
 import org.springframework.stereotype.Service;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 /**
- * Renders a payslip as HTML (via Thymeleaf) and prints that HTML to PDF using a real
+ * Renders documents as HTML (via Thymeleaf) and prints that HTML to PDF using a real
  * headless Chromium instance (via Playwright) — the same mechanism as a browser's own
- * "Print to PDF", so tables/wrapping/layout behave exactly as they would on screen.
- *
- * REQUIRED DEPENDENCIES (add to pom.xml, not included here):
- *   org.springframework.boot:spring-boot-starter-thymeleaf
- *   com.microsoft.playwright:playwright, version 1.48.0 or later
+ * "Print to PDF", so tables/wrapping/layout behave exactly as they would on screen. This
+ * is what makes a multi-page statement paginate correctly for free, rather than having to
+ * be laid out against a low-level PDF drawing API.
  *
  * REQUIRED ONE-TIME SETUP, easy to miss: Playwright's Java package does NOT bundle a
- * browser. After adding the dependency, run once (from the project root, after a build):
+ * browser. After a build, run once:
  *   mvn exec:java -e -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install chromium"
- * or equivalently:
- *   java -cp target/classes:$(find ~/.m2 -name 'playwright-*.jar' | tr '\n' ':') com.microsoft.playwright.CLI install chromium
  * Without this, Playwright.create() / .chromium().launch() will fail at runtime looking
  * for a browser executable that was never downloaded.
- *
- * NOT VERIFIED BY COMPILATION OR EXECUTION — written without Maven, Thymeleaf, or
- * Playwright available in the environment this was authored in. Review carefully; render
- * a slip end-to-end before relying on this.
  */
 @Service
 public class PdfGenerationService {
@@ -53,8 +46,29 @@ public class PdfGenerationService {
         context.setVariable("totalDeductions", request.totalDeductions());
         context.setVariable("netPay", request.netPay());
 
-        String html = templateEngine.process("slip", context);
+        return renderPdf(templateEngine.process("slip", context));
+    }
 
+    /**
+     * @return an account statement as raw PDF bytes. Unlike a slip this is a reading of
+     *         data the server already holds, so there is no client-supplied content in it
+     *         at all beyond the requested date range.
+     */
+    public byte[] generateStatementPdf(StatementDocument statement) {
+        Context context = new Context();
+        context.setVariable("statement", statement);
+
+        return renderPdf(templateEngine.process("statement", context));
+    }
+
+    /**
+     * Drives headless Chromium to print the given HTML.
+     *
+     * Shared by every document this service produces: launching a browser is the expensive
+     * and easy-to-leak part, and having one copy of it means a new document type is a
+     * template plus a context, not another lifecycle to get right.
+     */
+    private byte[] renderPdf(String html) {
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
             try {

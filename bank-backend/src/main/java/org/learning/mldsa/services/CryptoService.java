@@ -1,8 +1,10 @@
 package org.learning.mldsa.services;
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.learning.mldsa.models.User;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
@@ -12,46 +14,42 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
-import java.security.Security;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 
 /**
- * ML-DSA-65 (FIPS 204) key generation, envelope signing, and verification, plus SHA-384
- * file hashing. Requires Bouncy Castle's "BC" provider on the classpath — this is NOT
- * available in the plain JDK.
+ * Ed25519 key generation, envelope signing, and verification, plus SHA-384 file hashing.
  *
- * REQUIRED DEPENDENCY (add to pom.xml, not included here):
- *   org.bouncycastle:bcprov-jdk18on, version 1.78 or later.
- *   Earlier Bouncy Castle versions only expose the pre-standardization experimental
- *   "Dilithium" API under a different artifact (bcpqc-jdk18on) — that is NOT the same
- *   as "ML-DSA-65" and will not work with the algorithm name used below.
+ * Ed25519 is part of the JDK itself (JEP 339, Java 15+), so unlike the ML-DSA-65 scheme
+ * this replaced, there is no security provider to register and no third-party dependency
+ * to keep on the classpath — Bouncy Castle was removed along with that swap.
  *
- * NOT VERIFIED BY COMPILATION — written without access to Maven or the Bouncy Castle
- * jars in the environment this was authored in. Review carefully and run the
- * verification steps (register two users, send a file, download it) before relying
- * on this.
+ * The practical difference is size. ML-DSA-65 keys and signatures ran to kilobytes once
+ * Base64-encoded; Ed25519's are 32-64 raw bytes, which is why the entity columns holding
+ * them no longer need a TEXT override.
+ *
+ * Note this is a deliberate step away from post-quantum signing: Ed25519 is an
+ * elliptic-curve scheme, so it does not carry ML-DSA's resistance to a future
+ * quantum attacker. The tradeoff was made knowingly (see the core banking pivot plan) —
+ * the earlier post-quantum research remains valid if that priority returns.
+ *
+ * Keys are NOT interchangeable between the two schemes. An account provisioned under
+ * ML-DSA-65 cannot sign or verify here; it needs a freshly generated Ed25519 key pair,
+ * and signatures produced under the old scheme cannot be verified at all.
  */
 @Service
 public class CryptoService {
 
-    private static final String ALGORITHM = "ML-DSA-65";
-    private static final String PROVIDER = "BC";
+    private static final String ALGORITHM = "Ed25519";
 
-    static {
-        if (Security.getProvider(PROVIDER) == null) {
-            Security.addProvider(new BouncyCastleProvider());
-        }
-    }
-
-    public KeyPair generateMlDsaKeyPair() {
+    public KeyPair generateSigningKeyPair() {
         try {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM, PROVIDER);
+            KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
             return generator.generateKeyPair();
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to generate ML-DSA key pair", e);
+            throw new RuntimeException("Failed to generate Ed25519 key pair", e);
         }
     }
 
@@ -66,20 +64,20 @@ public class CryptoService {
     public PublicKey decodePublicKey(String base64) {
         try {
             byte[] bytes = Base64.getDecoder().decode(base64);
-            KeyFactory factory = KeyFactory.getInstance(ALGORITHM, PROVIDER);
+            KeyFactory factory = KeyFactory.getInstance(ALGORITHM);
             return factory.generatePublic(new X509EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to decode ML-DSA public key", e);
+            throw new RuntimeException("Failed to decode Ed25519 public key", e);
         }
     }
 
     public PrivateKey decodePrivateKey(String base64) {
         try {
             byte[] bytes = Base64.getDecoder().decode(base64);
-            KeyFactory factory = KeyFactory.getInstance(ALGORITHM, PROVIDER);
+            KeyFactory factory = KeyFactory.getInstance(ALGORITHM);
             return factory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to decode ML-DSA private key", e);
+            throw new RuntimeException("Failed to decode Ed25519 private key", e);
         }
     }
 
@@ -103,15 +101,111 @@ public class CryptoService {
      * exact string is what gets signed at send time and rebuilt (from the same
      * persisted values, never recomputed fresh) to verify at download time — changing
      * the field order or separator here invalidates every previously-issued signature.
+     *
+     * Unaffected by the move to Ed25519: what gets signed is independent of which
+     * algorithm signs it.
      */
     public String buildEnvelope(Long senderId, Long receiverId, String fileHash,
                                  String originalFilename, long sentAtEpochMilli) {
         return senderId + "|" + receiverId + "|" + fileHash + "|" + originalFilename + "|" + sentAtEpochMilli;
     }
 
+    /**
+     * The envelope for a transfer that carries an ISO 20022 payload beside its PDF.
+     *
+     * Extends the original with the transfer's UETR and the canonical hash of the XML, so
+     * one signature covers both artefacts. Signing them separately would leave the two
+     * swappable relative to each other: a valid PDF signature and a valid XML signature
+     * from two different transfers could be presented as one, with the documents disagreeing
+     * about the amount. Binding both into a single envelope makes that combination
+     * unverifiable.
+     *
+     * Kept as a separate method rather than adding parameters to the original, because a
+     * transfer with no XML must still rebuild the exact string that was signed for it.
+     * Every transfer sent before this existed, and every direct upload, has no XML hash —
+     * folding a null into the original envelope would have invalidated all of their
+     * signatures. Which form applies is decided by whether an XML hash was persisted, so
+     * reconstruction stays deterministic.
+     */
+    public String buildCombinedEnvelope(Long senderId, Long receiverId, String fileHash,
+                                         String originalFilename, long sentAtEpochMilli,
+                                         String uetr, String xmlHash) {
+        return buildEnvelope(senderId, receiverId, fileHash, originalFilename, sentAtEpochMilli)
+                + "|" + uetr + "|" + xmlHash;
+    }
+
+    /**
+     * Canonical signed form of a payment: who paid, who was paid, how much, and when.
+     *
+     * Accounts are identified by account number rather than database id — the number is
+     * the account's real-world identity, and it stays meaningful to anyone re-checking
+     * this signature later without access to this system's internal keys.
+     *
+     * The amount is normalised to two decimal places by canonicalAmount below, so the
+     * same sum always produces the same envelope regardless of how the caller wrote it.
+     */
+    public String buildPaymentEnvelope(String fromAccountNumber, String toAccountNumber,
+                                        BigDecimal amount, long timestampEpochMilli) {
+        return fromAccountNumber + "|" + toAccountNumber + "|"
+                + canonicalAmount(amount) + "|" + timestampEpochMilli;
+    }
+
+    /**
+     * Canonical signed form of a statement.
+     *
+     * Covers the figures a statement asserts — whose account, which period, what it opened
+     * and closed at — plus when it was produced, so two statements over the same period
+     * generated at different times are distinguishable rather than interchangeable.
+     *
+     * generatedAt is the ISO-8601 instant exactly as printed on the document, so a verifier
+     * can rebuild this string from the page in front of them without having to guess at a
+     * format or a timezone.
+     */
+    public String buildStatementEnvelope(String accountNumber, String periodFrom, String periodTo,
+                                          BigDecimal openingBalance, BigDecimal closingBalance,
+                                          String generatedAtIso) {
+        return accountNumber + "|" + periodFrom + "|" + periodTo + "|"
+                + canonicalAmount(openingBalance) + "|" + canonicalAmount(closingBalance) + "|"
+                + generatedAtIso;
+    }
+
+    /**
+     * The signing key of the account this document belongs to.
+     *
+     * Shared rather than repeated: every document the system signs is signed with its
+     * owner's own key, and the check for a missing key belongs with the decoding.
+     */
+    public PrivateKey signingKeyOf(User owner) {
+        if (owner.getPrivateKey() == null || owner.getPrivateKey().isBlank()) {
+            throw new RuntimeException("Account owner does not have a signing key pair provisioned");
+        }
+        return decodePrivateKey(owner.getPrivateKey());
+    }
+
+    /** Canonical signed form of a deposit — same shape, with no counterparty. */
+    public String buildDepositEnvelope(String accountNumber, BigDecimal amount, long timestampEpochMilli) {
+        return accountNumber + "|" + canonicalAmount(amount) + "|" + timestampEpochMilli;
+    }
+
+    /**
+     * Renders an amount the one way it is ever signed.
+     *
+     * Without this, 100.5 and 100.50 are the same money but different strings, so a
+     * signature produced over one would fail to verify when the envelope was later
+     * rebuilt from the other. Scaling is exact: an amount carrying more precision than
+     * currency allows is rejected rather than silently rounded into a different sum.
+     */
+    private String canonicalAmount(BigDecimal amount) {
+        try {
+            return amount.setScale(2, RoundingMode.UNNECESSARY).toPlainString();
+        } catch (ArithmeticException e) {
+            throw new RuntimeException("Amount must have at most 2 decimal places", e);
+        }
+    }
+
     public String sign(String payload, PrivateKey privateKey) {
         try {
-            Signature signature = Signature.getInstance(ALGORITHM, PROVIDER);
+            Signature signature = Signature.getInstance(ALGORITHM);
             signature.initSign(privateKey);
             signature.update(payload.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(signature.sign());
@@ -122,7 +216,7 @@ public class CryptoService {
 
     public boolean verify(String payload, String signatureBase64, PublicKey publicKey) {
         try {
-            Signature signature = Signature.getInstance(ALGORITHM, PROVIDER);
+            Signature signature = Signature.getInstance(ALGORITHM);
             signature.initVerify(publicKey);
             signature.update(payload.getBytes(StandardCharsets.UTF_8));
             return signature.verify(Base64.getDecoder().decode(signatureBase64));
