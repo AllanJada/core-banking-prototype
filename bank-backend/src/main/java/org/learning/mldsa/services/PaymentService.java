@@ -36,6 +36,14 @@ import java.util.List;
 @Service
 public class PaymentService {
 
+    /**
+     * What a customer is told when their bank could not settle the payment.
+     *
+     * Deliberately says nothing about which bank or why: a customer-facing message naming
+     * another institution's liquidity would leak it, and the cause is not theirs to fix.
+     */
+    private static final String SETTLEMENT_REFUSED = "The payment could not be settled";
+
     private final AccountService accountService;
     private final AccountRepository accountRepository;
     private final PaymentRepository paymentRepository;
@@ -48,6 +56,9 @@ public class PaymentService {
 
     @Value("${app.payments.max-per-day}")
     private BigDecimal maxPerDay;
+
+    @Value("${app.settlement.net-debit-cap}")
+    private BigDecimal netDebitCap;
 
     /**
      * Credits the caller's own account.
@@ -125,14 +136,41 @@ public class PaymentService {
                     "Amount would exceed the daily limit of " + maxPerDay);
         }
 
+        // Whether this payment has to settle between banks is decided by comparing the two
+        // accounts' institutions — never by anything the payer sends.
+        User payerBank = from.getInstitution();
+        User payeeBank = to.getInstitution();
+        boolean interBank = !payerBank.getUserId().equals(payeeBank.getUserId());
+
+        Account payerSettlement = null;
+        Account payeeSettlement = null;
+        if (interBank) {
+            // Locked before its position is read, so two payments leaving this institution at
+            // once cannot both be told there is room for one of them.
+            payerSettlement = requireSettlementForUpdate(payerBank);
+            payeeSettlement = requireSettlement(payeeBank);
+
+            BigDecimal position = accountService.balanceOf(payerSettlement.getAccountId());
+            if (position.subtract(amount).compareTo(netDebitCap.negate()) < 0) {
+                // The customer is told only that it could not be settled: naming their bank's
+                // liquidity to them would leak it, and it is not their doing. The specific
+                // cause is recorded for that institution and the Central Bank.
+                throw reject(from, to, amount, description, SETTLEMENT_REFUSED,
+                        payerBank.getName() + " would exceed its net debit cap of " + netDebitCap
+                                + " (position " + position + ", payment " + amount + ")");
+            }
+        }
+
         Instant createdAt = Instant.now();
         String envelope = cryptoService.buildPaymentEnvelope(
                 from.getAccountNumber(), to.getAccountNumber(), amount, createdAt.toEpochMilli());
         String signature = cryptoService.sign(envelope, ownerPrivateKey(from));
 
-        // Both postings are written together by the ledger, so the debit cannot land
-        // without its credit.
-        String transactionRef = accountService.transfer(from, to, amount, description);
+        // The postings are written together by the ledger, so a debit cannot land without its
+        // credit: two of them within one bank, four when the money crosses banks.
+        String transactionRef = interBank
+                ? accountService.settleInterBank(from, payerSettlement, payeeSettlement, to, amount, description)
+                : accountService.transfer(from, to, amount, description);
 
         Payment payment = new Payment();
         payment.setFromAccount(from);
@@ -164,11 +202,33 @@ public class PaymentService {
      */
     private RuntimeException reject(Account from, Account to, BigDecimal amount,
                                     String description, String reason) {
+        return reject(from, to, amount, description, reason, null);
+    }
+
+    /**
+     * As above, for a refusal whose specific cause is not the customer's business — the
+     * reason is what they are told, the detail is kept for their institution and the Central
+     * Bank.
+     */
+    private RuntimeException reject(Account from, Account to, BigDecimal amount,
+                                    String description, String reason, String detail) {
         failedPaymentRecorder.record(
                 from.getAccountId(),
                 to == null ? null : to.getAccountId(),
-                amount, description, reason);
+                amount, description, reason, detail);
         return new RuntimeException(reason);
+    }
+
+    private Account requireSettlementForUpdate(User institution) {
+        return accountRepository.findSettlementForUpdate(institution.getUserId())
+                .orElseThrow(() -> new RuntimeException(
+                        "No settlement account is open for " + institution.getName()));
+    }
+
+    private Account requireSettlement(User institution) {
+        return accountRepository.findByOwner_UserIdAndType(institution.getUserId(), AccountType.SETTLEMENT)
+                .orElseThrow(() -> new RuntimeException(
+                        "No settlement account is open for " + institution.getName()));
     }
 
     /**

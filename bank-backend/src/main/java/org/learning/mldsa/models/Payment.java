@@ -44,9 +44,21 @@ public class Payment {
     @Column(name = "status", nullable = false)
     private PaymentStatus status;
 
-    /** Why a FAILED payment was rejected; null when it completed. */
+    /** Why a FAILED payment was rejected, as the customer is told it; null when it completed. */
     @Column(name = "failure_reason")
     private String failureReason;
+
+    /**
+     * The specific cause behind a refusal the customer is told about only in general terms —
+     * today, an institution breaching its net debit cap.
+     *
+     * Kept apart from failureReason rather than replacing it because the two have different
+     * audiences: naming another bank's liquidity to a customer would leak it, while that
+     * institution and the Central Bank need to know exactly what happened. Null on every other
+     * kind of refusal, where the reason is already the whole story.
+     */
+    @Column(name = "failure_detail")
+    private String failureDetail;
 
     /** Ties this payment to its postings in the ledger. Null on a failed attempt. */
     @Column(name = "transaction_ref", length = 36)

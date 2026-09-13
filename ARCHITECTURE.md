@@ -120,7 +120,8 @@ database:
 
 The schema is owned by Flyway migrations in `resources/db/migration`. The baseline,
 `V1__baseline_schema.sql`, also creates the five schemas; `V2__institution_numbers.sql` adds
-institutions' bank numbers. Hibernate runs with
+institutions' bank numbers, and `V3__settlement_failure_detail.sql` the column holding why a
+bank could not settle. Hibernate runs with
 `ddl-auto=validate`: at startup it checks the entities against the migrated schema and
 changes nothing. Flyway was adopted at the two-tier reset, after `ddl-auto=update` had
 already caused a real bug (§9.2).
@@ -180,8 +181,25 @@ silently corrupts every balance that follows. A `Posting` row is append-only —
 row, never to edit or delete an old one.
 
 Every money-moving operation in the system (`AccountService.transfer`,
-`AccountService.credit`) writes its postings inside one `@Transactional` method, so a
-debit can never commit without its matching credit landing in the same transaction.
+`AccountService.credit`, `AccountService.settleInterBank`) writes its postings inside one
+`@Transactional` method, so a debit can never commit without its matching credit landing in
+the same transaction.
+
+### 4.3.1 Ledger invariants
+
+These are executable checks, not prose — `scripts/verify-two-tier-phase3.sh` runs each as SQL
+against the live database:
+
+| ID | Invariant |
+|---|---|
+| I1 | Every posting effect sums to the total deposited |
+| I2 | Settlement positions sum to zero, always |
+| I3 | Customer balances sum to the total deposited (follows from I1 and I2) |
+| I4 | Every payment's postings net to zero; every deposit's net to its amount |
+| I5 | An intra-bank payment never writes to a settlement account |
+
+I2 is also computed on every read of `GET /admin/summary` and `GET /admin/settlement`, and the
+Central Bank console shows an error banner if it ever fails.
 
 ### 4.4 Money representation
 
@@ -289,11 +307,28 @@ rather than issuing a number that would claim to belong to another bank.
 
 ### 6.2 Payments (`PaymentService`, `PaymentLinkService`, `FailedPaymentRecorder`)
 
-`PaymentService.pay` runs every check *before* writing anything: recipient exists, not
-paying yourself, under the per-transaction cap, sufficient balance (no overdraft —
-this system will never move an account below zero), under the daily cumulative cap. A
-passing payment is signed (`CryptoService.buildPaymentEnvelope`) and posted via
-`AccountService.transfer` in one transaction.
+`PaymentService.pay` runs every check *before* writing anything: recipient exists and is a
+customer account (a settlement account is refused exactly as an unknown number is), not
+paying yourself, under the per-transaction cap, sufficient balance (no overdraft — this
+system will never move an account below zero), under the daily cumulative cap.
+
+**Then it routes.** Comparing the two accounts' institutions — never anything the payer sends
+— decides whether this is an intra-bank payment (two postings via `AccountService.transfer`,
+settlement untouched) or an inter-bank one (four postings via
+`AccountService.settleInterBank`: the payer and their bank's settlement account debited, the
+payee and their bank's credited, all under one reference in one transaction).
+
+An inter-bank payment has one extra gate: the **net debit cap**. The paying institution's
+settlement account is locked (`findSettlementForUpdate`, `PESSIMISTIC_WRITE`) *before* its
+position is read, so two payments leaving one bank at once cannot both be told there is room
+for one of them; only the debited side is locked, so two banks paying each other cannot
+deadlock. A breach is refused with a deliberately generic message to the customer
+("The payment could not be settled") while the specific cause is recorded in `failureDetail`
+for that institution and the Central Bank — naming a bank's liquidity to a customer would
+leak it.
+
+A passing payment is signed (`CryptoService.buildPaymentEnvelope`) and posted in one
+transaction.
 
 **Refused payments are still recorded.** `FailedPaymentRecorder` runs in its own
 `REQUIRES_NEW` transaction — a separate Spring bean is required for this, since
@@ -368,7 +403,9 @@ two cannot drift apart because they're compiled from the same input.
 `AdminService` is read-only. What the `BANK` role can create (institutions and overseers)
 lives in `UserService` rather than in a general admin write surface. It sees institutions
 as aggregates only: `listInstitutions` returns each institution's customer count, customer
-funds held and settlement position. Each figure comes from one grouped query for the whole
+funds held and settlement position, while `settlement` returns every position with the I2
+check and the bank-to-bank movements behind them — derived from completed payments whose two
+institutions differ, and carrying no customer identity on either side. Each figure comes from one grouped query for the whole
 page (`countPerInstitution`, `sumBalancesPerInstitution`), and none of them exposes an
 individual customer's identity or balance. The earlier listing of every account was retired
 for that reason.
@@ -376,7 +413,10 @@ for that reason.
 `InstitutionService` is the institution's side. It provisions the institution's customers,
 lists them with balances and card status, and unblocks a customer's card, which
 `CardService` had documented as a bank operation that no role could perform. For the list,
-balances and cards are fetched once per page and joined in memory. Every method is
+balances and cards are fetched once per page and joined in memory. It also reports the
+institution's own summary — customer aggregates, its settlement position, and the headroom
+left under its net debit cap — and its own customers' payments, which is the one view where a
+settlement refusal's specific cause sits beside the customer who hit it. Every method is
 tenant-scoped (§5.4).
 
 ---
@@ -640,7 +680,9 @@ built, not assumed correct from reading the code:
 - **Repeatable suites**, added with the two-tier restructure and runnable against a live
   backend on an empty database: `bank-backend/scripts/verify-two-tier-phase1.sh` (the
   tenancy and provisioning refusals of §5.4), `verify-two-tier-phase2.sh` (institution-signed
-  statements and bank-numbered account/card numbers, verified outside the application), and
+  statements and bank-numbered account/card numbers, verified outside the application),
+  `verify-two-tier-phase3.sh` (a mixed intra/inter workload, the net debit cap, a concurrent
+  pair of inter-bank payments, and invariants I1–I5 in SQL), and
   `bank-frontend/scripts/verify-two-tier-ui.mjs` (the same hierarchy built through a real
   browser).
 - **Independent validation**: the generated ISO 20022 payload was validated with

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AppBar,
   Box,
@@ -27,6 +27,8 @@ import {
   downloadFile,
   downloadPayload,
   getInbox,
+  getInstitutionPayments,
+  getInstitutionSummary,
   getMyCustomers,
   getOutbox,
   unblockCustomerCard,
@@ -38,9 +40,9 @@ import { usePagedResource } from "../hooks/usePagedResource";
 import ProvisionCustomerDialog from "../components/ProvisionCustomerDialog";
 import SlipComposerDialog from "../components/SlipComposerDialog";
 import TransferReviewDialog from "../components/TransferReviewDialog";
-import type { Customer, FileTransfer } from "../types";
+import type { Customer, FileTransfer, InstitutionPayment, InstitutionSummary } from "../types";
 
-type Section = "customers" | "inbox" | "outbox";
+type Section = "overview" | "customers" | "payments" | "inbox" | "outbox";
 
 function money(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -58,18 +60,40 @@ function formatDate(iso: string): string {
   });
 }
 
+/** One figure on the overview. */
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5, flex: 1, minWidth: 190 }}>
+      <Typography variant="body2" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5 }}>
+        {value}
+      </Typography>
+      {hint && (
+        <Typography variant="caption" color="text.secondary">
+          {hint}
+        </Typography>
+      )}
+    </Paper>
+  );
+}
+
 /**
- * An institution's console: its own customers, and signed document exchange with other
- * institutions.
+ * An institution's console: its own customers and their payments, its position at the Central
+ * Bank, and signed document exchange with other institutions.
  *
- * The customer list is only ever this institution's. The backend scopes it to the signed-in
- * institution's token, so there is no filter here that could be got wrong.
+ * Everything here is scoped to the signed-in institution by the backend, so there is no
+ * filter in this page that could be got wrong. It is also the only screen that shows why a
+ * payment could not be settled — the customer who attempted it is told only that it could
+ * not be.
  */
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [tab, setTab] = useState<Section>("customers");
+  const [tab, setTab] = useState<Section>("overview");
+  const [summary, setSummary] = useState<InstitutionSummary | null>(null);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [slipDialogOpen, setSlipDialogOpen] = useState(false);
   const [reviewTransfer, setReviewTransfer] = useState<FileTransfer | null>(null);
@@ -77,11 +101,22 @@ export default function DashboardPage() {
   const [unblockingId, setUnblockingId] = useState<number | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
-  // No userId argument: the backend scopes all three to whoever the token says we are, and
-  // returns one page at a time rather than the whole list.
+  // No userId argument anywhere: the backend scopes every one of these to whoever the token
+  // says we are, and returns one page at a time rather than the whole list.
   const customers = usePagedResource<Customer>(getMyCustomers);
+  const payments = usePagedResource<InstitutionPayment>(getInstitutionPayments);
   const inbox = usePagedResource<FileTransfer>(getInbox);
   const outbox = usePagedResource<FileTransfer>(getOutbox);
+
+  const loadSummary = useCallback(() => {
+    getInstitutionSummary()
+      .then(setSummary)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    loadSummary();
+  }, [loadSummary]);
 
   const refresh = useCallback(() => {
     inbox.refresh();
@@ -141,7 +176,7 @@ export default function DashboardPage() {
       <AppBar position="static" elevation={0}>
         <Toolbar sx={{ gap: 2 }}>
           <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            Institution
+            Institution{summary ? ` · ${summary.institutionCode}` : ""}
           </Typography>
           <Typography variant="body2" sx={{ opacity: 0.85, display: { xs: "none", sm: "block" } }}>
             Signed in as {user.username}
@@ -157,7 +192,7 @@ export default function DashboardPage() {
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="md" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
         <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 1, mb: 2 }}>
           <Button
             variant="outlined"
@@ -184,12 +219,43 @@ export default function DashboardPage() {
             allowScrollButtonsMobile
             sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}
           >
+            <Tab label="Overview" value="overview" />
             <Tab label={`Customers (${customers.totalElements})`} value="customers" />
+            <Tab label={`Payments (${payments.totalElements})`} value="payments" />
             <Tab label={`Inbox (${inbox.totalElements})`} value="inbox" />
             <Tab label={`Outbox (${outbox.totalElements})`} value="outbox" />
           </Tabs>
 
           <Box sx={{ p: 2 }}>
+            {tab === "overview" && summary && (
+              <Stack spacing={2}>
+                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
+                  <Stat label="Customers" value={String(summary.customerCount)} />
+                  <Stat
+                    label="Customer funds held"
+                    value={money(summary.customerFundsHeld, summary.currency)}
+                    hint="summed from the ledger"
+                  />
+                  <Stat
+                    label="Settlement position"
+                    value={money(summary.settlementPosition, summary.currency)}
+                    hint={`account ${summary.settlementAccountNumber}`}
+                  />
+                  <Stat
+                    label="Headroom"
+                    value={money(summary.headroom, summary.currency)}
+                    hint={`net debit cap ${money(summary.netDebitCap, summary.currency)}`}
+                  />
+                </Stack>
+                <Typography variant="body2" color="text.secondary">
+                  A negative settlement position means this bank currently owes the rest of the
+                  system. When the headroom runs out, its customers' payments to other banks are
+                  refused — and they are told only that the payment could not be settled, so the
+                  reason to act on is here.
+                </Typography>
+              </Stack>
+            )}
+
             {tab === "customers" && (
               <>
                 <TableContainer>
@@ -255,6 +321,79 @@ export default function DashboardPage() {
               </>
             )}
 
+            {tab === "payments" && (
+              <>
+                <TableContainer>
+                  <Table size="small" sx={{ minWidth: 720 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Customer</TableCell>
+                        <TableCell>To</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell>Outcome</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {payments.items.length === 0 && !payments.loading && (
+                        <TableRow>
+                          <TableCell colSpan={5}>
+                            <Typography variant="body2" color="text.secondary">
+                              No payments by this institution's customers yet.
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {payments.items.map((payment) => (
+                        <TableRow key={payment.paymentId}>
+                          <TableCell>{formatDate(payment.createdAt)}</TableCell>
+                          <TableCell>{payment.customerUsername}</TableCell>
+                          <TableCell>
+                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                              <span>{payment.toAccountNumber ?? "—"}</span>
+                              {/* Flagged when the money had to settle between banks. */}
+                              {payment.interBank && payment.toInstitutionCode && (
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  color="info"
+                                  label={payment.toInstitutionCode}
+                                />
+                              )}
+                            </Stack>
+                          </TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                            {money(payment.amount, summary?.currency ?? "TZS")}
+                          </TableCell>
+                          <TableCell>
+                            {payment.status === "COMPLETED" ? (
+                              <Chip size="small" color="success" label="Completed" />
+                            ) : (
+                              <Stack spacing={0.5}>
+                                <Chip
+                                  size="small"
+                                  color="error"
+                                  variant="outlined"
+                                  label={payment.failureReason ?? "Failed"}
+                                />
+                                {/* What the customer was not told, and this bank needs. */}
+                                {payment.failureDetail && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {payment.failureDetail}
+                                  </Typography>
+                                )}
+                              </Stack>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                <Pager {...payments} onPageChange={payments.setPage} />
+              </>
+            )}
+
             {tab === "inbox" && (
               <>
                 <TransferTable
@@ -285,6 +424,7 @@ export default function DashboardPage() {
         onProvisioned={(customer) => {
           setSnackbar(`${customer.username} created — account ${customer.accountNumber}`);
           customers.refresh();
+          loadSummary();
         }}
       />
 

@@ -70,6 +70,9 @@ public class PaymentLinkController {
                 payment.getPaymentId(),
                 payment.getFromAccount().getAccountNumber(),
                 payment.getToAccount().getAccountNumber(),
+                // Paying a link resolves to an ordinary payment, so it settles between banks
+                // the same way and reports the receiving bank the same way.
+                payment.getToAccount().getInstitution().getInstitutionCode(),
                 payment.getAmount(),
                 payment.getDescription(),
                 payment.getStatus(),

@@ -30,6 +30,14 @@ public class AdminSummaryResponse {
     private long completedPayments;
     private long failedPayments;
     private BigDecimal completedPaymentVolume;
+    /**
+     * Sum of every institution's settlement position, and whether it is zero — invariant I2,
+     * checked on every read rather than assumed. A non-zero sum would mean an inter-bank
+     * payment had moved one position without the matching other side.
+     */
+    private BigDecimal settlementPositionsSum;
+    private boolean settlementBalanced;
+
     private long fileTransfers;
     /** Transfers carrying an ISO 20022 payload, of the total above. */
     private long transfersWithPayload;

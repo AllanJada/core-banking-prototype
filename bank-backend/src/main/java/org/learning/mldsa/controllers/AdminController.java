@@ -7,12 +7,12 @@ import org.learning.mldsa.dtos.InstitutionRequest;
 import org.learning.mldsa.dtos.InstitutionResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
 import org.learning.mldsa.dtos.PageResponse;
-import org.learning.mldsa.dtos.PaymentResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
+import org.learning.mldsa.dtos.SettlementRefusalResponse;
+import org.learning.mldsa.dtos.SettlementResponse;
 import org.learning.mldsa.dtos.UserResponse;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.FileTransfer;
-import org.learning.mldsa.models.Payment;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.services.AdminService;
 import org.learning.mldsa.services.UserService;
@@ -91,15 +91,31 @@ public class AdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(userService.createOverseer(request));
     }
 
-    /** Every payment, refused ones included, with the reason each was refused. */
-    @GetMapping("/payments")
-    ResponseEntity<PageResponse<PaymentResponse>> payments(
+    /**
+     * Settlement: every institution's position, whether they still sum to zero, and the
+     * bank-to-bank movements behind them.
+     *
+     * This replaced the earlier listing of every payment, which showed the Central Bank one
+     * customer paying another. Supervision is of institutions; who paid whom inside a bank
+     * stays with that bank.
+     */
+    @GetMapping("/settlement")
+    ResponseEntity<SettlementResponse> settlement(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size
+    ) {
+        return ResponseEntity.ok(adminService.settlement(PageRequestParams.of(page, size)));
+    }
+
+    /** Payments a bank could not settle, with the cause its customer was not given. */
+    @GetMapping("/settlement/refusals")
+    ResponseEntity<PageResponse<SettlementRefusalResponse>> settlementRefusals(
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size
     ) {
         return ResponseEntity.ok(PageResponse.of(
-                adminService.listPayments(PageRequestParams.of(page, size)),
-                AdminController::toResponse));
+                adminService.settlementRefusals(PageRequestParams.of(page, size)),
+                Function.identity()));
     }
 
     /** Every file transfer between institutions, across all participants. */
@@ -111,21 +127,6 @@ public class AdminController {
         return ResponseEntity.ok(PageResponse.of(
                 adminService.listTransfers(PageRequestParams.of(page, size)),
                 AdminController::toResponse));
-    }
-
-    private static PaymentResponse toResponse(Payment payment) {
-        Account to = payment.getToAccount();
-        return new PaymentResponse(
-                payment.getPaymentId(),
-                payment.getFromAccount().getAccountNumber(),
-                to == null ? null : to.getAccountNumber(),
-                payment.getAmount(),
-                payment.getDescription(),
-                payment.getStatus(),
-                payment.getFailureReason(),
-                payment.getTransactionRef(),
-                payment.getCreatedAt()
-        );
     }
 
     /**

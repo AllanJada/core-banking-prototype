@@ -90,6 +90,87 @@ export interface Customer {
   cardNumber: string | null;
 }
 
+/** One institution's standing at the Central Bank. */
+export interface SettlementPosition {
+  institutionId: number;
+  institutionName: string;
+  institutionCode: string;
+  institutionNumber: string;
+  settlementAccountNumber: string;
+  /** Negative means a net debtor to the rest of the system. */
+  position: number;
+  netDebitCap: number;
+  /** How much further this institution can settle outwards before refusals start. */
+  headroom: number;
+}
+
+/** One bank-to-bank movement. Carries no customer identity on either side. */
+export interface SettlementMovement {
+  paymentId: number;
+  transactionRef: string;
+  fromInstitutionName: string;
+  fromInstitutionCode: string;
+  toInstitutionName: string;
+  toInstitutionCode: string;
+  amount: number;
+  occurredAt: string;
+}
+
+export interface Settlement {
+  positions: SettlementPosition[];
+  /** Invariant I2: always zero, since every movement debits one position and credits another. */
+  positionsSum: number;
+  balanced: boolean;
+  currency: string;
+  movements: Page<SettlementMovement>;
+}
+
+/** A payment a bank could not settle, with the cause its customer was not given. */
+export interface SettlementRefusal {
+  paymentId: number;
+  institutionName: string;
+  institutionCode: string;
+  amount: number;
+  reason: string;
+  detail: string;
+  refusedAt: string;
+}
+
+/** An institution's own overview, including where it stands at the Central Bank. */
+export interface InstitutionSummary {
+  institutionId: number;
+  institutionName: string;
+  institutionCode: string;
+  institutionNumber: string;
+  currency: string;
+  customerCount: number;
+  customerFundsHeld: number;
+  settlementAccountNumber: string;
+  settlementPosition: number;
+  netDebitCap: number;
+  headroom: number;
+}
+
+/** A payment by one of the institution's own customers. */
+export interface InstitutionPayment {
+  paymentId: number;
+  customerUsername: string;
+  fromAccountNumber: string;
+  toAccountNumber: string | null;
+  toInstitutionCode: string | null;
+  /** Whether the money had to cross banks — four postings rather than two. */
+  interBank: boolean;
+  amount: number;
+  description: string | null;
+  status: PaymentStatus;
+  /** The reason as the customer was told it. */
+  failureReason: string | null;
+  /** The specific cause behind a settlement refusal; never shown to the customer. */
+  failureDetail: string | null;
+  transactionRef: string | null;
+  createdAt: string;
+}
+
 export interface AdminSummary {
   customers: number;
   institutions: number;
@@ -102,6 +183,9 @@ export interface AdminSummary {
   completedPayments: number;
   failedPayments: number;
   completedPaymentVolume: number;
+  /** Invariant I2, checked on every read: the positions must sum to zero. */
+  settlementPositionsSum: number;
+  settlementBalanced: boolean;
   fileTransfers: number;
   transfersWithPayload: number;
 }
@@ -113,6 +197,8 @@ export interface Payment {
   fromAccountNumber: string;
   /** Null when the payment was refused because no such recipient existed. */
   toAccountNumber: string | null;
+  /** The receiving bank's code, so a customer can see when money left their own bank. */
+  toInstitutionCode: string | null;
   amount: number;
   description: string | null;
   status: PaymentStatus;

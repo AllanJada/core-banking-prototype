@@ -2,17 +2,26 @@ package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.CustomerResponse;
+import org.learning.mldsa.dtos.InstitutionPaymentResponse;
+import org.learning.mldsa.dtos.InstitutionSummaryResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.DebitCard;
+import org.learning.mldsa.models.Role;
+import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.AccountBalance;
 import org.learning.mldsa.repositories.AccountRepository;
 import org.learning.mldsa.repositories.DebitCardRepository;
+import org.learning.mldsa.repositories.InstitutionBalance;
+import org.learning.mldsa.repositories.PaymentRepository;
 import org.learning.mldsa.repositories.PostingRepository;
+import org.learning.mldsa.repositories.UserRepositories;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +51,81 @@ public class InstitutionService {
     private final AccountRepository accountRepository;
     private final PostingRepository postingRepository;
     private final DebitCardRepository debitCardRepository;
+    private final PaymentRepository paymentRepository;
+    private final UserRepositories userRepositories;
+
+    @Value("${app.ledger.default-currency}")
+    private String currency;
+
+    @Value("${app.settlement.net-debit-cap}")
+    private BigDecimal netDebitCap;
+
+    /**
+     * The institution's own overview: its customers in aggregate, and where it stands at the
+     * Central Bank.
+     *
+     * It sees its own settlement position and the headroom left under its net debit cap —
+     * which is what turns "a customer's payment was refused" into something the bank can act
+     * on, while that customer is told only that it could not be settled.
+     */
+    public InstitutionSummaryResponse summary(Long institutionId) {
+        User institution = userRepositories.findById(institutionId)
+                .filter(user -> user.getRole() == Role.INSTITUTION)
+                .orElseThrow(() -> new AccessDeniedException("Only an institution has a summary"));
+        Account settlement = accountRepository
+                .findByOwner_UserIdAndType(institutionId, AccountType.SETTLEMENT)
+                .orElseThrow(() -> new RuntimeException("No settlement account is open for this institution"));
+
+        BigDecimal position = accountService.balanceOf(settlement.getAccountId());
+        BigDecimal customerFunds = postingRepository
+                .sumBalancesPerInstitution(AccountType.CUSTOMER, List.of(institutionId)).stream()
+                .map(InstitutionBalance::balance)
+                .findFirst()
+                // No postings against this institution's customers yet: zero, not unknown.
+                .orElse(BigDecimal.ZERO);
+
+        return new InstitutionSummaryResponse(
+                institution.getUserId(),
+                institution.getName(),
+                institution.getInstitutionCode(),
+                institution.getInstitutionNumber(),
+                currency,
+                accountRepository.countByInstitution_UserIdAndType(institutionId, AccountType.CUSTOMER),
+                customerFunds,
+                settlement.getAccountNumber(),
+                position,
+                netDebitCap,
+                position.add(netDebitCap)
+        );
+    }
+
+    /**
+     * Payments made by this institution's own customers, refused ones included.
+     *
+     * Scoped to the paying institution in the query, like every other method here, so one bank
+     * cannot read another's payment traffic. This is the one view that shows the specific
+     * cause of a settlement refusal beside the customer who hit it.
+     */
+    public Page<InstitutionPaymentResponse> listPayments(Long institutionId, Pageable pageable) {
+        return paymentRepository.findByPayingInstitution(institutionId, pageable).map(payment -> {
+            Account to = payment.getToAccount();
+            User receivingInstitution = to == null ? null : to.getInstitution();
+            return new InstitutionPaymentResponse(
+                    payment.getPaymentId(),
+                    payment.getFromAccount().getOwner().getName(),
+                    payment.getFromAccount().getAccountNumber(),
+                    to == null ? null : to.getAccountNumber(),
+                    receivingInstitution == null ? null : receivingInstitution.getInstitutionCode(),
+                    receivingInstitution != null && !receivingInstitution.getUserId().equals(institutionId),
+                    payment.getAmount(),
+                    payment.getDescription(),
+                    payment.getStatus(),
+                    payment.getFailureReason(),
+                    payment.getFailureDetail(),
+                    payment.getTransactionRef(),
+                    payment.getCreatedAt());
+        });
+    }
 
     @Transactional
     public CustomerResponse createCustomer(Long institutionId, ProvisionRequest request) {

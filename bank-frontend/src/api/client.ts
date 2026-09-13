@@ -8,13 +8,17 @@ import type {
   DepositRequest,
   FileTransfer,
   Institution,
+  InstitutionPayment,
   InstitutionRequest,
+  InstitutionSummary,
   Payment,
   PaymentLink,
   PaymentLinkRequest,
   PaymentPreview,
   PaymentRequest,
   Posting,
+  Settlement,
+  SettlementRefusal,
   SlipRequest,
   User,
 } from "../types";
@@ -115,12 +119,48 @@ export async function getAdminInstitutions(page?: number, size?: number): Promis
   return handleResponse<Page<Institution>>(response);
 }
 
-/** Every payment across all accounts, refused ones included. Bank role only. */
-export async function getAdminPayments(page?: number, size?: number): Promise<Page<Payment>> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/admin/payments${pageQuery(page, size)}`, {
+/**
+ * Settlement positions and the bank-to-bank movements behind them. Bank role only.
+ *
+ * This replaced the earlier every-payment listing: the Central Bank supervises institutions,
+ * so it sees banks moving money between each other, never one customer paying another.
+ */
+export async function getAdminSettlement(page?: number, size?: number): Promise<Settlement> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/admin/settlement${pageQuery(page, size)}`, {
     headers: authHeaders(),
   });
-  return handleResponse<Page<Payment>>(response);
+  return handleResponse<Settlement>(response);
+}
+
+/** Payments a bank could not settle, with the cause its customer was not given. */
+export async function getAdminSettlementRefusals(
+  page?: number,
+  size?: number
+): Promise<Page<SettlementRefusal>> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/settlement/refusals${pageQuery(page, size)}`,
+    { headers: authHeaders() }
+  );
+  return handleResponse<Page<SettlementRefusal>>(response);
+}
+
+/** The signed-in institution's own aggregates and settlement position. */
+export async function getInstitutionSummary(): Promise<InstitutionSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/institution/summary`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<InstitutionSummary>(response);
+}
+
+/** Payments by the signed-in institution's own customers, refused ones included. */
+export async function getInstitutionPayments(
+  page?: number,
+  size?: number
+): Promise<Page<InstitutionPayment>> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/institution/payments${pageQuery(page, size)}`, {
+    headers: authHeaders(),
+  });
+  return handleResponse<Page<InstitutionPayment>>(response);
 }
 
 /** Every file transfer between institutions. Bank role only. */

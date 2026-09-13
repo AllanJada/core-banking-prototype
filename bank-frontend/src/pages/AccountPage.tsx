@@ -349,7 +349,22 @@ export default function AccountPage() {
                   payments.items.map((payment) => (
                     <TableRow key={payment.paymentId}>
                       <TableCell>{formatDate(payment.createdAt)}</TableCell>
-                      <TableCell>{payment.toAccountNumber ?? "—"}</TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                          <span>{payment.toAccountNumber ?? "—"}</span>
+                          {/* Named only when the money left this customer's own bank, which
+                              is the case that settles between institutions. */}
+                          {payment.toInstitutionCode &&
+                            account &&
+                            payment.toInstitutionCode !== account.institutionCode && (
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                label={payment.toInstitutionCode}
+                              />
+                            )}
+                        </Stack>
+                      </TableCell>
                       <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
                         {account
                           ? formatMoney(payment.amount, account.currency)

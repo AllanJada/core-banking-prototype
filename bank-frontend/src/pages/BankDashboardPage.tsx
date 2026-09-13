@@ -25,7 +25,8 @@ import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
 import { useNavigate } from "react-router-dom";
 import {
   getAdminInstitutions,
-  getAdminPayments,
+  getAdminSettlement,
+  getAdminSettlementRefusals,
   getAdminSummary,
   getAdminTransfers,
 } from "../api/client";
@@ -34,9 +35,16 @@ import ProvisionAccountDialog from "../components/ProvisionAccountDialog";
 import Pager from "../components/Pager";
 import { usePagedResource } from "../hooks/usePagedResource";
 import SignatureChip from "../components/SignatureChip";
-import type { AdminSummary, FileTransfer, Institution, Payment } from "../types";
+import type {
+  AdminSummary,
+  FileTransfer,
+  Institution,
+  Settlement,
+  SettlementMovement,
+  SettlementRefusal,
+} from "../types";
 
-type Section = "overview" | "institutions" | "payments" | "transfers";
+type Section = "overview" | "institutions" | "settlement" | "transfers";
 
 function money(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -81,8 +89,8 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
  * way to create a customer, adjust a balance, reverse a payment or unblock a card from this
  * screen — customers belong to their institution.
  *
- * Institutions are shown as aggregates only. How much an institution's customers hold between
- * them is supervision; who they are stays with their own bank.
+ * What it shows about banks is aggregated, and what it shows about money moving between them
+ * is bank-to-bank. Neither the institutions tab nor the settlement tab names a customer.
  */
 export default function BankDashboardPage() {
   const { user, logout } = useAuth();
@@ -90,9 +98,20 @@ export default function BankDashboardPage() {
 
   const [section, setSection] = useState<Section>("overview");
   const [summary, setSummary] = useState<AdminSummary | null>(null);
-  // Each of these grows without bound, so all three are paged.
+  const [settlement, setSettlement] = useState<Settlement | null>(null);
+
+  // The settlement view returns every position alongside each page of movements, so paging
+  // the movements refreshes the positions with them rather than needing a second request.
+  const fetchMovements = useCallback(async (page: number, size: number) => {
+    const view = await getAdminSettlement(page, size);
+    setSettlement(view);
+    return view.movements;
+  }, []);
+
+  // Each of these grows without bound, so all of them are paged.
   const institutions = usePagedResource<Institution>(getAdminInstitutions);
-  const payments = usePagedResource<Payment>(getAdminPayments);
+  const movements = usePagedResource<SettlementMovement>(fetchMovements);
+  const refusals = usePagedResource<SettlementRefusal>(getAdminSettlementRefusals);
   const transfers = usePagedResource<FileTransfer>(getAdminTransfers);
   const [provisionOpen, setProvisionOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +122,8 @@ export default function BankDashboardPage() {
       .then(setSummary)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load summary"));
     institutions.refresh();
-    payments.refresh();
+    movements.refresh();
+    refusals.refresh();
     transfers.refresh();
   }, []);
 
@@ -117,7 +137,7 @@ export default function BankDashboardPage() {
   }
 
   if (!user) return null;
-  const currency = summary?.currency ?? "TZS";
+  const currency = summary?.currency ?? settlement?.currency ?? "TZS";
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
@@ -142,6 +162,16 @@ export default function BankDashboardPage() {
           </Alert>
         )}
 
+        {/* The one invariant worth shouting about: if the positions stop summing to zero,
+            an inter-bank payment moved one side without the other. */}
+        {summary && !summary.settlementBalanced && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Settlement positions do not sum to zero (
+            {money(summary.settlementPositionsSum, currency)}). Investigate before relying on
+            any figure on this page.
+          </Alert>
+        )}
+
         <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
           <Button
             variant="contained"
@@ -163,7 +193,7 @@ export default function BankDashboardPage() {
           >
             <Tab label="Overview" value="overview" />
             <Tab label={`Institutions (${institutions.totalElements})`} value="institutions" />
-            <Tab label={`Payments (${payments.totalElements})`} value="payments" />
+            <Tab label={`Settlement (${movements.totalElements})`} value="settlement" />
             <Tab label={`Transfers (${transfers.totalElements})`} value="transfers" />
           </Tabs>
 
@@ -192,6 +222,17 @@ export default function BankDashboardPage() {
                   <Stat label="Customers" value={String(summary.customers)} />
                   <Stat label="Institutions" value={String(summary.institutions)} />
                   <Stat label="Central Bank overseers" value={String(summary.bankOperators)} />
+                  <Stat
+                    label="Settlement positions"
+                    value={money(summary.settlementPositionsSum, summary.currency)}
+                    hint={
+                      summary.settlementBalanced
+                        ? "balanced — they sum to zero (I2)"
+                        : "NOT balanced — investigate"
+                    }
+                  />
+                </Stack>
+                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
                   <Stat
                     label="File transfers"
                     value={String(summary.fileTransfers)}
@@ -244,47 +285,153 @@ export default function BankDashboardPage() {
               </>
             )}
 
-            {section === "payments" && (
-              <>
-              <TableContainer>
-                <Table size="small" sx={{ minWidth: 640 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell>From</TableCell>
-                      <TableCell>To</TableCell>
-                      <TableCell align="right">Amount</TableCell>
-                      <TableCell>Outcome</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {payments.items.map((payment) => (
-                      <TableRow key={payment.paymentId}>
-                        <TableCell>{formatDate(payment.createdAt)}</TableCell>
-                        <TableCell>{payment.fromAccountNumber}</TableCell>
-                        <TableCell>{payment.toAccountNumber ?? "—"}</TableCell>
-                        <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                          {money(payment.amount, currency)}
-                        </TableCell>
-                        <TableCell>
-                          {payment.status === "COMPLETED" ? (
-                            <Chip size="small" color="success" label="Completed" />
-                          ) : (
-                            <Chip
-                              size="small"
-                              color="error"
-                              variant="outlined"
-                              label={payment.failureReason ?? "Failed"}
-                            />
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <Pager {...payments} onPageChange={payments.setPage} />
-              </>
+            {section === "settlement" && (
+              <Stack spacing={3}>
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                    Positions
+                  </Typography>
+                  <TableContainer>
+                    <Table size="small" sx={{ minWidth: 640 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Institution</TableCell>
+                          <TableCell>Settlement account</TableCell>
+                          <TableCell align="right">Position</TableCell>
+                          <TableCell align="right">Net debit cap</TableCell>
+                          <TableCell align="right">Headroom</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {(settlement?.positions ?? []).map((position) => (
+                          <TableRow key={position.institutionId}>
+                            <TableCell>
+                              <Chip size="small" variant="outlined" label={position.institutionCode} />{" "}
+                              {position.institutionName}
+                            </TableCell>
+                            <TableCell sx={{ letterSpacing: 0.5 }}>
+                              {position.settlementAccountNumber}
+                            </TableCell>
+                            <TableCell
+                              align="right"
+                              sx={{
+                                whiteSpace: "nowrap",
+                                fontWeight: 600,
+                                color: position.position < 0 ? "error.main" : "text.primary",
+                              }}
+                            >
+                              {money(position.position, settlement?.currency ?? currency)}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                              {money(position.netDebitCap, settlement?.currency ?? currency)}
+                            </TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                              {money(position.headroom, settlement?.currency ?? currency)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {settlement && (
+                          <TableRow>
+                            <TableCell colSpan={2} sx={{ fontWeight: 700 }}>
+                              Sum of positions
+                            </TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+                              {money(settlement.positionsSum, settlement.currency)}
+                            </TableCell>
+                            <TableCell colSpan={2}>
+                              <Chip
+                                size="small"
+                                color={settlement.balanced ? "success" : "error"}
+                                variant={settlement.balanced ? "filled" : "outlined"}
+                                label={settlement.balanced ? "Balanced (I2)" : "Not balanced"}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </Box>
+
+                <Box>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                    Movements
+                  </Typography>
+                  <TableContainer>
+                    <Table size="small" sx={{ minWidth: 640 }}>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>When</TableCell>
+                          <TableCell>From bank</TableCell>
+                          <TableCell>To bank</TableCell>
+                          <TableCell align="right">Amount</TableCell>
+                          <TableCell>Reference</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {movements.items.length === 0 && !movements.loading && (
+                          <TableRow>
+                            <TableCell colSpan={5}>
+                              <Typography variant="body2" color="text.secondary">
+                                No inter-bank payments yet. Payments within one bank never touch
+                                settlement.
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {movements.items.map((movement) => (
+                          <TableRow key={movement.paymentId}>
+                            <TableCell>{formatDate(movement.occurredAt)}</TableCell>
+                            <TableCell>{movement.fromInstitutionCode}</TableCell>
+                            <TableCell>{movement.toInstitutionCode}</TableCell>
+                            <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                              {money(movement.amount, settlement?.currency ?? currency)}
+                            </TableCell>
+                            <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>
+                              {movement.transactionRef?.slice(0, 8)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  <Pager {...movements} onPageChange={movements.setPage} />
+                </Box>
+
+                {refusals.totalElements > 0 && (
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                      Could not be settled
+                    </Typography>
+                    <TableContainer>
+                      <Table size="small" sx={{ minWidth: 640 }}>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>When</TableCell>
+                            <TableCell>Institution</TableCell>
+                            <TableCell align="right">Amount</TableCell>
+                            <TableCell>Cause</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {refusals.items.map((refusal) => (
+                            <TableRow key={refusal.paymentId}>
+                              <TableCell>{formatDate(refusal.refusedAt)}</TableCell>
+                              <TableCell>{refusal.institutionCode}</TableCell>
+                              <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                                {money(refusal.amount, settlement?.currency ?? currency)}
+                              </TableCell>
+                              {/* The specific cause, which the customer was not given. */}
+                              <TableCell>{refusal.detail}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    <Pager {...refusals} onPageChange={refusals.setPage} />
+                  </Box>
+                )}
+              </Stack>
             )}
 
             {section === "transfers" && (

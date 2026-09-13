@@ -2,6 +2,8 @@ package org.learning.mldsa.controllers;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.CustomerResponse;
+import org.learning.mldsa.dtos.InstitutionPaymentResponse;
+import org.learning.mldsa.dtos.InstitutionSummaryResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
 import org.learning.mldsa.dtos.PageResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
@@ -44,6 +46,26 @@ public class InstitutionController {
     ) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(institutionService.createCustomer(institution.userId(), request));
+    }
+
+    /** This institution's own aggregates, settlement position and headroom under its cap. */
+    @GetMapping("/summary")
+    ResponseEntity<InstitutionSummaryResponse> summary(
+            @AuthenticationPrincipal AuthenticatedUser institution
+    ) {
+        return ResponseEntity.ok(institutionService.summary(institution.userId()));
+    }
+
+    /** Payments by this institution's own customers, with the reasons refusals happened. */
+    @GetMapping("/payments")
+    ResponseEntity<PageResponse<InstitutionPaymentResponse>> payments(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @AuthenticationPrincipal AuthenticatedUser institution
+    ) {
+        return ResponseEntity.ok(PageResponse.of(
+                institutionService.listPayments(institution.userId(), PageRequestParams.of(page, size)),
+                Function.identity()));
     }
 
     @GetMapping("/customers")

@@ -18,6 +18,11 @@ public class PaymentResponse {
     private String fromAccountNumber;
     /** Null when the payment was refused because no such recipient existed. */
     private String toAccountNumber;
+    /**
+     * The receiving bank's code, so a customer can see when their money left their own bank.
+     * Null when the recipient could not be resolved.
+     */
+    private String toInstitutionCode;
     private BigDecimal amount;
     private String description;
     private PaymentStatus status;

@@ -1,7 +1,7 @@
 # Two-Tier Banking: Central Bank, Institutions, and Customers
 
-Status: **Phases 1 and 2 implemented (see §13); Phase 3 is not.** Every open question in
-§12 was resolved by accepting its recommendation.
+Status: **Implemented — all three phases (see §13).** Every open question in §12 was resolved
+by accepting its recommendation. What this plan deliberately left out is listed in §14.
 
 This plan restructures the system from a flat platform (where the Central Bank provisions
 everyone, customers included) into the two-tier model real banking systems use. A central
@@ -405,6 +405,35 @@ unblocked by their own bank and by no other.
 **Done when:** invariants I1–I5 hold against the running database after a mixed run of
 intra-bank and inter-bank payments, including a concurrent pair of inter-bank payments
 from one institution.
+
+**Implemented.** Notes:
+
+- **Four postings, one reference, one transaction** (`AccountService.settleInterBank`), taken
+  when the two accounts' institutions differ. Intra-bank payments still write the same two
+  postings as before and never touch a settlement account (I5).
+- **The net debit cap (Q1) is one configured value** (`app.settlement.net-debit-cap`, default
+  5,000,000 TZS) applied to each institution independently, rather than a per-institution
+  column. It is genuinely "per institution" in effect; a stored per-bank override would need an
+  endpoint for the Central Bank to vary it, which nothing in this plan calls for. That is the
+  natural next step if caps should differ by bank.
+- **The concurrency case is closed by locking** the paying institution's settlement account
+  (`findSettlementForUpdate`, `PESSIMISTIC_WRITE`) before its position is read, so two payments
+  leaving one bank at once cannot both be told there is room for one of them. Only the debited
+  side is locked — a credited position only rises — which also means two banks paying each
+  other simultaneously cannot deadlock.
+- **The refusal is split across two columns** (Q1): `failureReason` is what the customer is
+  told ("The payment could not be settled", naming no bank and no cause) and `failureDetail`
+  is the specific breach, exposed only to that institution and the Central Bank. The
+  customer-facing payment response has no detail field at all, rather than relying on a
+  mapping to remember to redact it.
+- **Added beyond §7.1:** `GET /admin/settlement/refusals` and `GET /institution/payments`,
+  without which Q1's "visible to the institution and the Central Bank" would have had nowhere
+  to appear. The institution view is the one place the detail sits beside the customer who hit
+  it, which §6's visibility table allows a bank for its own customers.
+- **Retired:** `GET /admin/payments`, replaced by `GET /admin/settlement` as §7.2 required.
+- **Verification:** `bank-backend/scripts/verify-two-tier-phase3.sh` runs a mixed intra/inter
+  workload, drives a bank into its cap, fires the concurrent pair, and then checks I1–I5 in SQL
+  against the database rather than asking the application whether it is consistent.
 
 ---
 

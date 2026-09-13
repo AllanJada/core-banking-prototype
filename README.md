@@ -139,6 +139,31 @@ src
 - Payments settle synchronously, so there is no PENDING state: a payment either completed
   or it moved no money at all
 
+### Inter-Bank Settlement
+
+- **A payment between customers of the same bank writes two postings**, exactly as before —
+  no money leaves the bank, so settlement is not involved
+- **A payment between customers of different banks writes four**, under one reference in one
+  transaction: the payer and their bank's settlement account are debited, the payee and their
+  bank's settlement account are credited. Each bank's books stay balanced, and the four
+  postings net to zero. Which route a payment takes is decided by comparing the two accounts'
+  institutions, never by anything the payer sends
+- **Settlement positions are derived from postings**, like every other balance, so the
+  Central Bank's view cannot drift from the ledger it describes. A negative position means
+  that bank currently owes the rest of the system
+- **A net debit cap bounds how far a position may go negative.** A payment that would breach
+  it is refused and recorded. The customer is told only that the payment could not be settled
+  — naming a bank's liquidity to them would leak it — while the specific cause is visible to
+  their own institution and to the Central Bank
+- **Two payments leaving one bank at once cannot both slip through** a cap that only has room
+  for one: the paying bank's settlement account is locked before its position is read. Only
+  the debited side is locked, so two banks paying each other at the same moment cannot
+  deadlock
+- The invariants (positions always sum to zero, every payment's postings net to zero, an
+  intra-bank payment never touches settlement) are **checked in SQL against the running
+  database** by `bank-backend/scripts/verify-two-tier-phase3.sh`, and the zero-sum check is
+  recomputed on every read of the Central Bank's console
+
 ### Account Statements
 
 - A customer can download a statement for any date range as a PDF, rendered through the
@@ -405,8 +430,11 @@ per method.
   count, customer funds held and settlement position. It never shows customers' names or
   individual balances, which stay with their own bank. Each figure is one grouped query for
   the whole page, not one query per institution
-- **Payments and transfers** across all participants, including each transfer's signature
-  status and whether it carries an ISO 20022 payload
+- **Settlement**: every institution's position, cap and headroom, whether the positions still
+  sum to zero, the bank-to-bank movements behind them, and what could not be settled and why.
+  Movements name banks, never the customers on either side
+- **Transfers** across all participants, including each transfer's signature status and
+  whether it carries an ISO 20022 payload
 - **Nothing here touches customers' money.** There is no balance adjustment, payment
   reversal, card unblock or customer creation. The console's only writes are licensing
   institutions and adding overseers
@@ -526,9 +554,9 @@ The core banking pivot's module list is complete.
 **In progress: two-tier banking.** The Central Bank provisions institutions rather than
 customers, and institutions own their customers. Cross-bank payments will settle through
 institution settlement accounts. The agreed decisions, design, and phased plan are in
-[`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md). Phase 1 (tenancy and the provisioning
-chain) and Phase 2 (institution-signed statements, institution-coded account and card numbers)
-are implemented. Phase 3 (inter-bank settlement and supervision) is not.
+[`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md). **All three phases are implemented**:
+tenancy and the provisioning chain, institution-signed statements with institution-coded
+account and card numbers, and inter-bank settlement with supervision.
 
 Beyond that, what remains is deployment-stage work and the items named below as deliberately
 out of scope:

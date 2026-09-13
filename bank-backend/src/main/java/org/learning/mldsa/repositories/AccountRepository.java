@@ -1,11 +1,13 @@
 package org.learning.mldsa.repositories;
 
+import jakarta.persistence.LockModeType;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.AccountType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -25,6 +27,10 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     long countByType(AccountType type);
 
+    List<Account> findByType(AccountType type);
+
+    long countByInstitution_UserIdAndType(Long institutionId, AccountType type);
+
     /**
      * One customer's account, found only if it is held at the given institution.
      *
@@ -41,6 +47,23 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             Long institutionId, AccountType type, Pageable pageable);
 
     List<Account> findByInstitution_UserIdInAndType(Collection<Long> institutionIds, AccountType type);
+
+    /**
+     * An institution's settlement account, locked for the rest of the transaction.
+     *
+     * Taken before an inter-bank payment reads the position it is about to check against the
+     * net debit cap, so two payments leaving the same institution at once cannot both be told
+     * there is room for one of them. Only the debited side is ever locked: a credited position
+     * only rises, so there is nothing to race for, and locking exactly one row means two
+     * institutions paying each other at the same moment cannot deadlock.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select a from Account a
+            where a.institution.userId = :institutionId
+              and a.type = org.learning.mldsa.models.AccountType.SETTLEMENT
+            """)
+    Optional<Account> findSettlementForUpdate(@Param("institutionId") Long institutionId);
 
     /**
      * How many accounts of a type each of the given institutions holds, in one grouped query.

@@ -35,9 +35,14 @@ public class FailedPaymentRecorder {
     private final PaymentRepository paymentRepository;
     private final AccountRepository accountRepository;
 
+    /**
+     * @param reason what the customer is told
+     * @param detail the specific cause, for the institution and the Central Bank only; null
+     *               when the reason itself is already the whole story
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(Long fromAccountId, Long toAccountId, BigDecimal amount,
-                       String description, String reason) {
+                       String description, String reason, String detail) {
         Payment payment = new Payment();
         payment.setFromAccount(accountRepository.getReferenceById(fromAccountId));
         // Null when the rejection was that no such recipient exists.
@@ -48,6 +53,7 @@ public class FailedPaymentRecorder {
         payment.setDescription(description);
         payment.setStatus(PaymentStatus.FAILED);
         payment.setFailureReason(reason);
+        payment.setFailureDetail(detail);
         payment.setCreatedAt(Instant.now());
         // transactionRef and signature stay null: no postings were written, and nothing
         // that did not happen gets signed.

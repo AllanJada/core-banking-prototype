@@ -3,6 +3,11 @@ package org.learning.mldsa.services;
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.AdminSummaryResponse;
 import org.learning.mldsa.dtos.InstitutionResponse;
+import org.learning.mldsa.dtos.PageResponse;
+import org.learning.mldsa.dtos.SettlementMovementResponse;
+import org.learning.mldsa.dtos.SettlementPositionResponse;
+import org.learning.mldsa.dtos.SettlementRefusalResponse;
+import org.learning.mldsa.dtos.SettlementResponse;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.FileTransfer;
@@ -26,6 +31,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -53,6 +59,9 @@ public class AdminService {
 
     @Value("${app.ledger.default-currency}")
     private String currency;
+
+    @Value("${app.settlement.net-debit-cap}")
+    private BigDecimal netDebitCap;
 
     /**
      * A page of institutions, each with its aggregates.
@@ -96,8 +105,62 @@ public class AdminService {
         });
     }
 
-    public Page<Payment> listPayments(Pageable pageable) {
-        return paymentRepository.findAllByOrderByCreatedAtDescPaymentIdDesc(pageable);
+    /**
+     * Where every institution stands, and the movements that put them there.
+     *
+     * Positions are read from the ledger rather than stored, exactly like a customer's
+     * balance, so the sum below cannot drift from the postings it describes. Movements are
+     * derived by comparing each completed payment's two institutions — the ledger already
+     * knows where an account is held, and a flag duplicating that could disagree with it.
+     */
+    public SettlementResponse settlement(Pageable pageable) {
+        List<Account> settlementAccounts = accountRepository.findByType(AccountType.SETTLEMENT);
+        Map<Long, BigDecimal> balances = balancesOf(settlementAccounts);
+
+        List<SettlementPositionResponse> positions = settlementAccounts.stream()
+                .map(account -> {
+                    User institution = account.getInstitution();
+                    BigDecimal position = balances.getOrDefault(account.getAccountId(), BigDecimal.ZERO);
+                    return new SettlementPositionResponse(
+                            institution.getUserId(),
+                            institution.getName(),
+                            institution.getInstitutionCode(),
+                            institution.getInstitutionNumber(),
+                            account.getAccountNumber(),
+                            position,
+                            netDebitCap,
+                            // A payment is refused once it would take the position below
+                            // -cap, so what remains is the position plus the cap.
+                            position.add(netDebitCap));
+                })
+                .sorted(Comparator.comparing(SettlementPositionResponse::getInstitutionCode))
+                .toList();
+
+        BigDecimal positionsSum = positions.stream()
+                .map(SettlementPositionResponse::getPosition)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return new SettlementResponse(
+                positions,
+                positionsSum,
+                positionsSum.signum() == 0,
+                currency,
+                PageResponse.of(paymentRepository.findInterBankCompleted(pageable), AdminService::toMovement));
+    }
+
+    /** Payments a bank could not settle, with the cause the customer was not told. */
+    public Page<SettlementRefusalResponse> settlementRefusals(Pageable pageable) {
+        return paymentRepository.findSettlementRefusals(pageable).map(payment -> {
+            User institution = payment.getFromAccount().getInstitution();
+            return new SettlementRefusalResponse(
+                    payment.getPaymentId(),
+                    institution.getName(),
+                    institution.getInstitutionCode(),
+                    payment.getAmount(),
+                    payment.getFailureReason(),
+                    payment.getFailureDetail(),
+                    payment.getCreatedAt());
+        });
     }
 
     public Page<FileTransfer> listTransfers(Pageable pageable) {
@@ -121,6 +184,12 @@ public class AdminService {
 
         List<FileTransfer> transfers = fileTransferRepository.findAll();
 
+        // Invariant I2, checked rather than assumed: every inter-bank payment debits one
+        // settlement account and credits another, so these can only ever sum to zero.
+        BigDecimal settlementPositionsSum = balancesOf(accountRepository.findByType(AccountType.SETTLEMENT))
+                .values().stream()
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
         return new AdminSummaryResponse(
                 byRole.getOrDefault(Role.NORMAL_USER, 0L),
                 byRole.getOrDefault(Role.INSTITUTION, 0L),
@@ -131,9 +200,34 @@ public class AdminService {
                 completed,
                 payments.size() - completed,
                 completedVolume,
+                settlementPositionsSum,
+                settlementPositionsSum.signum() == 0,
                 transfers.size(),
                 transfers.stream().filter(t -> t.getStoredXmlFilename() != null).count()
         );
+    }
+
+    private static SettlementMovementResponse toMovement(Payment payment) {
+        User from = payment.getFromAccount().getInstitution();
+        User to = payment.getToAccount().getInstitution();
+        return new SettlementMovementResponse(
+                payment.getPaymentId(),
+                payment.getTransactionRef(),
+                from.getName(),
+                from.getInstitutionCode(),
+                to.getName(),
+                to.getInstitutionCode(),
+                payment.getAmount(),
+                payment.getCreatedAt());
+    }
+
+    private Map<Long, BigDecimal> balancesOf(List<Account> accounts) {
+        List<Long> accountIds = accounts.stream().map(Account::getAccountId).toList();
+        if (accountIds.isEmpty()) {
+            return Map.of();
+        }
+        return postingRepository.sumBalancesOf(accountIds).stream()
+                .collect(Collectors.toMap(AccountBalance::accountId, AccountBalance::balance));
     }
 
     private Map<Long, BigDecimal> balancesPerInstitution(AccountType type, Collection<Long> institutionIds) {

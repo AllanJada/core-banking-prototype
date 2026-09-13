@@ -144,6 +144,34 @@ public class AccountService {
         return transactionRef;
     }
 
+    /**
+     * Moves money between customers at different institutions: four postings under one
+     * transactionRef, written in one transaction.
+     *
+     * The paying customer is debited and the receiving customer credited, exactly as in a
+     * same-bank transfer. What differs is that the paying institution's settlement account is
+     * debited by the same amount and the receiving institution's credited — so each bank's
+     * books still balance (its obligation to its customer moved by the same amount as its
+     * position did), and the four postings net to zero. This is a simplified form of what a
+     * real-time gross settlement system does between banks.
+     *
+     * This extends the pairing idea rather than inventing a second mechanism: the postings
+     * still go through recordPosting, still share one reference, and still commit together.
+     * The net debit cap and every other check are the caller's responsibility, as with
+     * transfer().
+     */
+    @Transactional
+    public String settleInterBank(Account from, Account fromSettlement,
+                                  Account toSettlement, Account to,
+                                  BigDecimal amount, String description) {
+        String transactionRef = newTransactionRef();
+        recordPosting(from, PostingDirection.DEBIT, amount, description, transactionRef);
+        recordPosting(fromSettlement, PostingDirection.DEBIT, amount, description, transactionRef);
+        recordPosting(toSettlement, PostingDirection.CREDIT, amount, description, transactionRef);
+        recordPosting(to, PostingDirection.CREDIT, amount, description, transactionRef);
+        return transactionRef;
+    }
+
     /** Credits an account with no counterparty — what a deposit does. */
     @Transactional
     public String credit(Account account, BigDecimal amount, String description) {

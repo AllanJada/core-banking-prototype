@@ -77,6 +77,10 @@ public class PaymentController {
                 payment.getPaymentId(),
                 payment.getFromAccount().getAccountNumber(),
                 to == null ? null : to.getAccountNumber(),
+                // The receiving bank, so a customer can tell when their money left their own.
+                // Never the failure detail: a settlement refusal's specific cause belongs to
+                // their institution and the Central Bank, not to them.
+                to == null ? null : to.getInstitution().getInstitutionCode(),
                 payment.getAmount(),
                 payment.getDescription(),
                 payment.getStatus(),
