@@ -237,7 +237,7 @@ fi
 
 echo "== Its signature, verified outside the application"
 python3 - "$WORK_DIR/sent.xml" \
-  "$(sql "select uetr || '|' || debtor_agent_code || '|' || creditor_agent_code || '|' || to_char(amount, 'FM9999999990.00') || '|' || xml_hash || '|' || (extract(epoch from created_at) * 1000)::bigint from payments.settlement_messages where message_id = $MESSAGE_ID")" \
+  "$(sql "select uetr || '|' || debtor_agent_code || '|' || creditor_agent_code || '|' || to_char(amount, 'FM9999999990.00') || '|' || xml_hash || '|' || floor(extract(epoch from created_at) * 1000)::bigint from payments.settlement_messages where message_id = $MESSAGE_ID")" \
   "$(sql "select signature from payments.settlement_messages where message_id = $MESSAGE_ID")" \
   "$(sql "select u.public_key from identity.users u join payments.settlement_messages m on m.debtor_agent_id = u.user_id where m.message_id = $MESSAGE_ID")" \
   "$(sql "select xml_hash from payments.settlement_messages where message_id = $MESSAGE_ID")" <<'PYTHON'

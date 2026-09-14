@@ -453,6 +453,9 @@ Named deliberately, so their absence isn't mistaken for oversight:
   `pacs.008.001.08`, generated from the official schema and stored encrypted, readable by the
   two banks party to it and the Central Bank. See the README section and
   `bank-backend/scripts/verify-iso20022-pacs008.sh`.
-- **Payroll disbursement from slips.** A slip's payer and payee could eventually move real
-  money between real accounts, which is a natural extension once institutions own accounts.
+- ~~**Payroll disbursement from slips.**~~ **Since implemented** (2026-09-13), as this entry
+  anticipated: a slip's payer and payee now move real money between real accounts. The
+  receiving institution's approval executes the instruction, through the ordinary payment path,
+  so an inter-bank payroll settles and produces a `pacs.008` like any other. See
+  `bank-backend/scripts/verify-slip-disbursement.sh`.
 - KMS/HSM key custody, which remains deferred to the deployment stage.

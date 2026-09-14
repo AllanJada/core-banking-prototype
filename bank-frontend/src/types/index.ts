@@ -305,6 +305,15 @@ export interface FileTransfer {
   reviewedAt?: string | null;
   /** Why the recipient rejected this transfer; null unless status is REJECTED. */
   rejectionReason?: string | null;
+  /**
+   * The payment that disbursed this transfer's instruction, set when it was approved.
+   *
+   * Null until then, and null forever for a plain file upload — which carries no instruction
+   * and moves no money. This is how a document that paid someone is told apart from one that
+   * only said it would.
+   */
+  paymentId?: number | null;
+  disbursedAmount?: number | null;
 }
 
 /**

@@ -116,6 +116,25 @@ public class PaymentService {
         if (to == null) {
             throw reject(from, null, amount, description, "No account exists with that number");
         }
+        return execute(from, to, amount, description);
+    }
+
+    /**
+     * Moves money between two accounts the caller has already resolved.
+     *
+     * This is the path a payroll disbursement takes: the payer is named by a signed document
+     * rather than by whoever holds the session, so it cannot be derived from a token the way
+     * pay() does. Everything after that point is deliberately the same code — the caps, the
+     * overdraft rule, the settlement routing, the signature and the interbank message — so a
+     * slip cannot become a second way to move money with its own subtly different rules.
+     */
+    @Transactional
+    public Payment disburse(Account from, Account to, BigDecimal amount, String description) {
+        requireWellFormedAmount(amount);
+        return execute(from, to, amount, description);
+    }
+
+    private Payment execute(Account from, Account to, BigDecimal amount, String description) {
         if (to.getAccountId().equals(from.getAccountId())) {
             throw reject(from, to, amount, description, "An account cannot pay itself");
         }

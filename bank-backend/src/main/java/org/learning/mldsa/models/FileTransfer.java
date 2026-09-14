@@ -102,4 +102,18 @@ public class FileTransfer {
     // re-checked and possibly flipped to false on every download attempt.
     @Column(name = "signature_valid")
     private Boolean signatureValid;
+
+    /**
+     * The payment that disbursed this transfer's instruction, set when it was approved.
+     *
+     * A slip describes a credit transfer; approving it is what executes that description, and
+     * this is the link between the document and the money it moved. Null for a plain file
+     * upload, which carries no instruction, and for anything still awaiting review.
+     *
+     * One payment per transfer, enforced by a unique constraint as well as by the row lock
+     * taken at approval: a transfer is decided once, so it can never disburse twice.
+     */
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payment_id", unique = true)
+    private Payment payment;
 }

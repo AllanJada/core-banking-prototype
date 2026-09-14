@@ -100,8 +100,14 @@ export default function TransferReviewDialog({ transfer, onClose, onDecided }: T
     setSubmitting(true);
     setError(null);
     try {
-      await approveTransfer(transfer.transferId);
-      onDecided("Transfer approved — it can now be downloaded");
+      const decided = await approveTransfer(transfer.transferId);
+      // Approving a slip executes its instruction, so say what actually moved rather than
+      // only that the document was accepted.
+      onDecided(
+        decided.paymentId != null && decided.disbursedAmount != null
+          ? `Approved — ${money(decided.disbursedAmount, preview?.payload?.currency ?? "TZS")} disbursed`
+          : "Transfer approved — it can now be downloaded"
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not approve this transfer");
     } finally {
@@ -146,6 +152,24 @@ export default function TransferReviewDialog({ transfer, onClose, onDecided }: T
 
           {preview?.status === "REJECTED" && transfer?.rejectionReason && (
             <Alert severity="warning">Rejected: {transfer.rejectionReason}</Alert>
+          )}
+
+          {/* The decision moves money, so it is stated before the buttons rather than
+              discovered afterwards. Rejecting costs nothing, which is why it is said here. */}
+          {canDecide && preview?.payload && preview.integrityValid && (
+            <Alert severity="info">
+              Approving this pays{" "}
+              <strong>{money(preview.payload.amount, preview.payload.currency)}</strong> from{" "}
+              {preview.payload.debtorAccountNumber} to {preview.payload.creditorAccountNumber}.
+              Rejecting moves nothing.
+            </Alert>
+          )}
+
+          {transfer?.paymentId != null && transfer.disbursedAmount != null && (
+            <Alert severity="success">
+              Disbursed: {money(transfer.disbursedAmount, preview?.payload?.currency ?? "TZS")}{" "}
+              (payment #{transfer.paymentId}).
+            </Alert>
           )}
 
           {preview?.payload && (
@@ -254,7 +278,11 @@ export default function TransferReviewDialog({ transfer, onClose, onDecided }: T
               // out by clicking; the alert above already told them why.
               disabled={submitting || loading || rejecting || preview?.integrityValid === false}
             >
-              {submitting ? "Approving…" : "Approve"}
+              {submitting
+                ? "Approving…"
+                : preview?.payload
+                  ? "Approve & disburse"
+                  : "Approve"}
             </Button>
           </>
         )}

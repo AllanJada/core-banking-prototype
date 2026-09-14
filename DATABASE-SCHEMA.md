@@ -1,6 +1,6 @@
 # Database Schema
 
-Status: reflects the live schema after migrations `V1`–`V4`, dumped from a migrated database
+Status: reflects the live schema after migrations `V1`–`V5`, dumped from a migrated database
 rather than written by hand.
 
 One PostgreSQL database, five schemas — one per owning module — plus Flyway's own history table
@@ -201,6 +201,11 @@ to an institution cannot silently invalidate — or silently repair — an old s
 | `status` | `varchar(255)` not null | `SENT` → `APPROVED` \| `REJECTED` → `DOWNLOADED` |
 | `sent_at` / `downloaded_at` / `reviewed_at` | `timestamptz` | |
 | `rejection_reason` | `text` | |
+| `payment_id` | `bigint` | Unique. → `payments.payments`. The payment that disbursed this slip's instruction when it was approved |
+
+*Why `payment_id` is unique:* a transfer is decided once, so it can never have disbursed twice.
+The constraint enforces that even if the row lock taken at approval were ever removed. Null for
+a plain file upload, which carries no instruction, and for anything still awaiting review.
 
 ### A note on the `CHECK` constraints
 
@@ -412,12 +417,15 @@ CREATE TABLE filetransfer.file_transfers (
     downloaded_at       timestamp(6) with time zone,
     reviewed_at         timestamp(6) with time zone,
     rejection_reason    text,
+    payment_id          bigint,
     CONSTRAINT file_transfers_pkey PRIMARY KEY (transfer_id),
     CONSTRAINT file_transfers_stored_filename_key UNIQUE (stored_filename),
     CONSTRAINT file_transfers_stored_xml_filename_key UNIQUE (stored_xml_filename),
+    CONSTRAINT file_transfers_payment_key UNIQUE (payment_id),
     CONSTRAINT file_transfers_status_check CHECK (status IN ('SENT', 'APPROVED', 'REJECTED', 'DOWNLOADED')),
     CONSTRAINT file_transfers_sender_fk FOREIGN KEY (sender_id) REFERENCES identity.users (user_id),
-    CONSTRAINT file_transfers_receiver_fk FOREIGN KEY (receiver_id) REFERENCES identity.users (user_id)
+    CONSTRAINT file_transfers_receiver_fk FOREIGN KEY (receiver_id) REFERENCES identity.users (user_id),
+    CONSTRAINT file_transfers_payment_fk FOREIGN KEY (payment_id) REFERENCES payments.payments (payment_id)
 );
 
 -- ---------------------------------------------------------------------------------------
@@ -447,7 +455,7 @@ refuse to start. Tell it the schema is already at V4:
 
 ```properties
 spring.flyway.baseline-on-migrate=true
-spring.flyway.baseline-version=4
+spring.flyway.baseline-version=5
 ```
 
 …or insert the history rows yourself. The script is most useful for reading, for a throwaway

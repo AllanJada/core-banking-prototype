@@ -178,7 +178,11 @@ public class AdminController {
                 transfer.getUetr(),
                 transfer.getStoredXmlFilename() != null,
                 transfer.getReviewedAt(),
-                transfer.getRejectionReason()
+                transfer.getRejectionReason(),
+                // Whether approving this document actually moved money, which is exactly the
+                // kind of thing an oversight view exists to notice.
+                transfer.getPayment() == null ? null : transfer.getPayment().getPaymentId(),
+                transfer.getPayment() == null ? null : transfer.getPayment().getAmount()
         );
     }
 }

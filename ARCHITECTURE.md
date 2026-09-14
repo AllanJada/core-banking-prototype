@@ -122,7 +122,8 @@ database:
 The schema is owned by Flyway migrations in `resources/db/migration`. The baseline,
 `V1__baseline_schema.sql`, also creates the five schemas; `V2__institution_numbers.sql` adds
 institutions' bank numbers, `V3__settlement_failure_detail.sql` the column holding why a bank
-could not settle, and `V4__settlement_messages.sql` the interbank messages table. Hibernate runs with
+could not settle, `V4__settlement_messages.sql` the interbank messages table, and
+`V5__slip_disbursement.sql` the link from a transfer to the payment its approval disbursed. Hibernate runs with
 `ddl-auto=validate`: at startup it checks the entities against the migrated schema and
 changes nothing. Flyway was adopted at the two-tier reset, after `ddl-auto=update` had
 already caused a real bug (§9.2).
@@ -173,7 +174,9 @@ User (identity.users)
              ├─ storedFilename, storedXmlFilename (payload, optional)
              ├─ fileHash, xmlHash, signature, signatureValid
              ├─ uetr: UUIDv4, minted once, never regenerated
-             └─ reviewedAt, rejectionReason (nullable — set on approve/reject)
+             ├─ reviewedAt, rejectionReason (nullable — set on approve/reject)
+             └─ payment → Payment (unique, nullable): the disbursement its
+                approval made. Null for a plain upload, which instructs nothing
 ```
 
 ### 4.3 The one design decision everything else follows from
@@ -589,6 +592,19 @@ promise true for a much narrower class of problems than the one this module exis
 catch; this was found and fixed during implementation by testing against an actually
 corrupted file, not assumed to work from reading the code.
 
+### 8.1.1 Approving a slip disburses it
+
+`approve` is also where a payment instruction becomes money (`SlipDisbursementService`). The
+transfer row is locked, integrity is re-verified, and only then is the payload parsed for the
+amount and the two account numbers — the money that moves is read from the document that was
+just proven unaltered. The disbursement runs through `PaymentService.disburse`, the same code
+`pay` uses once it has resolved its accounts, so a payroll obeys the caps, the overdraft rule
+and the settlement routing without a second implementation of any of them.
+
+It happens at approval rather than at send because rejecting has to stay free: with no reversal
+mechanism (see `REMAINING-WORK.md` §3.1), money moved at send would need one as soon as a
+recipient declined. A disbursement that fails throws, rolling the approval back to `SENT`.
+
 ### 8.2 Why approve re-verifies instead of trusting an earlier preview
 
 `approve` re-runs the full (throwing) integrity check at the moment of the decision,
@@ -710,7 +726,9 @@ built, not assumed correct from reading the code:
   pair of inter-bank payments, and invariants I1–I5 in SQL),
   `verify-iso20022-pacs008.sh` (the interbank message validated against the official schema
   and its signature verified outside the application, plus who may read it and what happens
-  when a stored message is tampered with), and
+  when a stored message is tampered with), `verify-slip-disbursement.sh` (a slip moves money on
+  approval and only then, pays once however many approvals arrive, and fails its approval
+  rather than the ledger when it cannot be afforded), and
   `bank-frontend/scripts/verify-two-tier-ui.mjs` (the same hierarchy built through a real
   browser).
 - **Independent validation**: the generated ISO 20022 payload was validated with

@@ -282,9 +282,30 @@ nothing but the institution's public key and what is on the paper.
 
 ### 3.11 Documents between institutions
 
-Compose a slip → server renders the PDF → generates the matching `pain.001` → hashes both →
-signs **one combined envelope** over the document, the payload and the UETR → encrypts at rest.
-The recipient previews, then approves or rejects; only after approval can it be downloaded.
+Compose a slip → server checks the payer and payee accounts can actually be paid → renders the
+PDF → generates the matching `pain.001` → hashes both → signs **one combined envelope** over the
+document, the payload and the UETR → encrypts at rest. The recipient previews, then approves or
+rejects; only after approval can it be downloaded.
+
+**Approving a slip moves money.** That is the moment the instruction is executed:
+
+1. The transfer row is locked, so two approvals arriving at once cannot both disburse it.
+2. Integrity is re-verified — document and payload both.
+3. *Then* the payload is parsed, and the amount and both account numbers are taken from it.
+4. The payer (a customer of the sending bank) is debited and the payee (a customer of the
+   receiving bank) credited, through the ordinary payment path — so the caps, the overdraft
+   rule, settlement routing and the `pacs.008` all apply unchanged.
+5. The payment is linked to the transfer, and the transfer becomes `APPROVED`.
+
+*Why in that order:* the money that moves is read from the signed document, so the document has
+to be proven unaltered first — there is no second copy of the amount that could drift from it.
+*Why at approval rather than at send:* rejecting must stay free. This system has no reversals,
+so money moved at send would need one the moment a recipient said no. And a disbursement that
+cannot be made — insufficient funds, a cap, a closed settlement position — throws, which rolls
+the approval back and leaves the slip awaiting review rather than approved-but-unpaid. The
+refusal is still recorded, so the paying bank can see why its payroll did not go out.
+
+A plain file upload carries no instruction and disburses nothing.
 
 *Why:* one envelope over both artefacts stops a valid PDF signature and a valid XML signature
 from two different transfers being presented as one pair that disagree about the amount.
@@ -315,6 +336,7 @@ exactly that reason. Aggregates cross the privacy boundary; individual balances 
 | `verify-two-tier-phase2.sh` | A statement verifies against the **institution's** key and not the customer's, outside the application; account and card numbers carry the bank's prefix |
 | `verify-two-tier-phase3.sh` | Mixed intra/inter workload, the cap, a concurrent pair of payments, and invariants **I1–I5 in SQL against the database** |
 | `verify-iso20022-pacs008.sh` | The interbank message validates against the official XSD and its signature verifies, both outside the application; who may read it; tampering refused |
+| `verify-slip-disbursement.sh` | A slip moves money on approval and only then: sending and rejecting move nothing, approving twice pays once, and an unaffordable slip fails its approval without touching the ledger |
 | `verify-two-tier-ui.mjs` | The whole hierarchy built through a real browser, from an empty database |
 
 The invariants themselves:
