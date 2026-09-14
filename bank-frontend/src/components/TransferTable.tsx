@@ -1,6 +1,7 @@
 import {
   Box,
   Button,
+  Chip,
   Table,
   TableBody,
   TableCell,
@@ -79,7 +80,13 @@ export default function TransferTable({
                 {formatTimestamp(transfer.sentAt)}
               </TableCell>
               <TableCell>
-                <StatusChip status={transfer.status} />
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+                  <StatusChip status={transfer.status} />
+                  {/* Approving a slip moves money. This says whether it did. */}
+                  {transfer.paymentId != null && (
+                    <Chip size="small" color="success" variant="outlined" label="Disbursed" />
+                  )}
+                </Stack>
               </TableCell>
               <TableCell>
                 <SignatureChip transfer={transfer} />

@@ -182,6 +182,24 @@ public class CryptoService {
         return decodePrivateKey(owner.getPrivateKey());
     }
 
+    /**
+     * Canonical signed form of an interbank settlement message.
+     *
+     * Binds the payment's identity, the two banks, the amount and the hash of the message
+     * itself into one signature, so "this pacs.008, for this transfer, between these two
+     * agents" cannot be recombined: a valid message from one payment cannot be presented as
+     * the instruction for another.
+     *
+     * A separate builder rather than an extension of an existing one, for the reason
+     * buildCombinedEnvelope is separate — every envelope this system has ever signed must
+     * stay rebuildable in exactly the form it was signed.
+     */
+    public String buildSettlementMessageEnvelope(String uetr, String debtorAgentCode, String creditorAgentCode,
+                                                  BigDecimal amount, String xmlHash, long createdAtEpochMilli) {
+        return uetr + "|" + debtorAgentCode + "|" + creditorAgentCode + "|"
+                + canonicalAmount(amount) + "|" + xmlHash + "|" + createdAtEpochMilli;
+    }
+
     /** Canonical signed form of a deposit — same shape, with no counterparty. */
     public String buildDepositEnvelope(String accountNumber, BigDecimal amount, long timestampEpochMilli) {
         return accountNumber + "|" + canonicalAmount(amount) + "|" + timestampEpochMilli;

@@ -14,6 +14,7 @@ import org.learning.mldsa.models.FileTransfer;
 import org.learning.mldsa.models.Payment;
 import org.learning.mldsa.models.PaymentStatus;
 import org.learning.mldsa.models.Role;
+import org.learning.mldsa.models.SettlementMessage;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.AccountBalance;
 import org.learning.mldsa.repositories.AccountRepository;
@@ -22,6 +23,7 @@ import org.learning.mldsa.repositories.InstitutionBalance;
 import org.learning.mldsa.repositories.InstitutionCount;
 import org.learning.mldsa.repositories.PaymentRepository;
 import org.learning.mldsa.repositories.PostingRepository;
+import org.learning.mldsa.repositories.SettlementMessageRepository;
 import org.learning.mldsa.repositories.UserRepositories;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
@@ -56,6 +58,7 @@ public class AdminService {
     private final PostingRepository postingRepository;
     private final PaymentRepository paymentRepository;
     private final FileTransferRepository fileTransferRepository;
+    private final SettlementMessageRepository settlementMessageRepository;
 
     @Value("${app.ledger.default-currency}")
     private String currency;
@@ -140,12 +143,23 @@ public class AdminService {
                 .map(SettlementPositionResponse::getPosition)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        Page<Payment> interBankPayments = paymentRepository.findInterBankCompleted(pageable);
+        List<Long> paymentIds = interBankPayments.map(Payment::getPaymentId).getContent();
+        // One query for the page's interbank messages, so a movement can be traced to the
+        // instruction that carried it without a lookup per row.
+        Map<Long, Long> messageIds = paymentIds.isEmpty() ? Map.of()
+                : settlementMessageRepository.findByPayment_PaymentIdIn(paymentIds).stream()
+                        .collect(Collectors.toMap(
+                                message -> message.getPayment().getPaymentId(),
+                                SettlementMessage::getMessageId));
+
         return new SettlementResponse(
                 positions,
                 positionsSum,
                 positionsSum.signum() == 0,
                 currency,
-                PageResponse.of(paymentRepository.findInterBankCompleted(pageable), AdminService::toMovement));
+                PageResponse.of(interBankPayments,
+                        payment -> toMovement(payment, messageIds.get(payment.getPaymentId()))));
     }
 
     /** Payments a bank could not settle, with the cause the customer was not told. */
@@ -207,11 +221,12 @@ public class AdminService {
         );
     }
 
-    private static SettlementMovementResponse toMovement(Payment payment) {
+    private static SettlementMovementResponse toMovement(Payment payment, Long messageId) {
         User from = payment.getFromAccount().getInstitution();
         User to = payment.getToAccount().getInstitution();
         return new SettlementMovementResponse(
                 payment.getPaymentId(),
+                messageId,
                 payment.getTransactionRef(),
                 from.getName(),
                 from.getInstitutionCode(),

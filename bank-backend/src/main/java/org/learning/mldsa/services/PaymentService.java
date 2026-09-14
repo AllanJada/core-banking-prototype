@@ -50,6 +50,7 @@ public class PaymentService {
     private final DepositRepository depositRepository;
     private final CryptoService cryptoService;
     private final FailedPaymentRecorder failedPaymentRecorder;
+    private final SettlementMessageService settlementMessageService;
 
     @Value("${app.payments.max-per-transaction}")
     private BigDecimal maxPerTransaction;
@@ -115,6 +116,25 @@ public class PaymentService {
         if (to == null) {
             throw reject(from, null, amount, description, "No account exists with that number");
         }
+        return execute(from, to, amount, description);
+    }
+
+    /**
+     * Moves money between two accounts the caller has already resolved.
+     *
+     * This is the path a payroll disbursement takes: the payer is named by a signed document
+     * rather than by whoever holds the session, so it cannot be derived from a token the way
+     * pay() does. Everything after that point is deliberately the same code — the caps, the
+     * overdraft rule, the settlement routing, the signature and the interbank message — so a
+     * slip cannot become a second way to move money with its own subtly different rules.
+     */
+    @Transactional
+    public Payment disburse(Account from, Account to, BigDecimal amount, String description) {
+        requireWellFormedAmount(amount);
+        return execute(from, to, amount, description);
+    }
+
+    private Payment execute(Account from, Account to, BigDecimal amount, String description) {
         if (to.getAccountId().equals(from.getAccountId())) {
             throw reject(from, to, amount, description, "An account cannot pay itself");
         }
@@ -182,7 +202,18 @@ public class PaymentService {
         payment.setSignature(signature);
         payment.setCreatedAt(createdAt);
 
-        return paymentRepository.save(payment);
+        Payment saved = paymentRepository.save(payment);
+
+        // The interbank leg: a payment that crossed banks is also an instruction from one bank
+        // to the other, written as an ISO 20022 pacs.008. Inside this same transaction, so
+        // money and the message instructing it commit together — and a message that cannot be
+        // generated or schema-validated takes the payment down with it rather than leaving a
+        // settled transfer nobody can evidence.
+        if (interBank) {
+            settlementMessageService.record(saved, from, to);
+        }
+
+        return saved;
     }
 
     /** A page of payments this account has sent, successful and refused alike, newest first. */

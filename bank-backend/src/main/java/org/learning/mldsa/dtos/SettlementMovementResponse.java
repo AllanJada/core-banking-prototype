@@ -21,7 +21,12 @@ import java.time.Instant;
 @AllArgsConstructor
 public class SettlementMovementResponse {
     private Long paymentId;
-    /** Ties this movement to its four postings in the ledger. */
+    /**
+     * The ISO 20022 pacs.008 instructing this movement, to fetch it by. Null only for a
+     * movement made before interbank messages existed.
+     */
+    private Long messageId;
+    /** Ties this movement to its four postings in the ledger, and to the message's UETR. */
     private String transactionRef;
     private String fromInstitutionName;
     private String fromInstitutionCode;

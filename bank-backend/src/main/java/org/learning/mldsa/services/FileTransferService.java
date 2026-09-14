@@ -32,6 +32,7 @@ public class FileTransferService {
     private final CryptoService cryptoService;
     private final XmlCanonicalizationService xmlCanonicalizationService;
     private final Pain001GenerationService pain001GenerationService;
+    private final SlipDisbursementService slipDisbursementService;
 
     public FileTransferResponse sendFile(Long senderId, Long receiverId, MultipartFile file) {
         byte[] fileBytes;
@@ -236,6 +237,17 @@ public class FileTransferService {
         Resource resource = fileStorageService.loadAsResource(transfer.getStoredFilename());
         verifyIntegrityOrThrow(transfer, resource);
 
+        // A slip carries a payment instruction, and approving it is what executes it — this is
+        // the moment a document becomes money. Deliberately after the integrity check above:
+        // the amount and accounts are read out of the signed payload, so proving the payload
+        // is unaltered has to come first. A disbursement that cannot be made throws, which
+        // rolls back this approval and leaves the transfer awaiting review rather than
+        // approved-but-unpaid.
+        if (transfer.getStoredXmlFilename() != null) {
+            transfer.setPayment(slipDisbursementService.disburse(
+                    transfer, readStoredFile(transfer.getStoredXmlFilename())));
+        }
+
         transfer.setStatus(TransferStatus.APPROVED);
         transfer.setReviewedAt(Instant.now());
         return toResponse(fileTransferRepository.save(transfer));
@@ -263,7 +275,9 @@ public class FileTransferService {
     }
 
     private FileTransfer requireReviewable(Long transferId, Long userId) {
-        FileTransfer transfer = fileTransferRepository.findByTransferIdAndReceiver_UserId(transferId, userId)
+        // Locked for the rest of the transaction: approving now moves money, so two decisions
+        // arriving at once must not both pass the status check below.
+        FileTransfer transfer = fileTransferRepository.findForReview(transferId, userId)
                 .orElseThrow(() -> new RuntimeException("File not found, or you are not the recipient"));
         if (transfer.getStatus() != TransferStatus.SENT) {
             throw new RuntimeException("This transfer has already been reviewed");
@@ -496,7 +510,9 @@ public class FileTransferService {
                 transfer.getUetr(),
                 transfer.getStoredXmlFilename() != null,
                 transfer.getReviewedAt(),
-                transfer.getRejectionReason()
+                transfer.getRejectionReason(),
+                transfer.getPayment() == null ? null : transfer.getPayment().getPaymentId(),
+                transfer.getPayment() == null ? null : transfer.getPayment().getAmount()
         );
     }
 }

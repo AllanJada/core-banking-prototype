@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Getter
@@ -39,4 +40,14 @@ public class FileTransferResponse {
 
     /** Why the recipient rejected this transfer; null unless status is REJECTED. */
     private String rejectionReason;
+
+    /**
+     * The payment that disbursed this transfer's instruction, once approved.
+     *
+     * Null until then, and null forever for a plain file upload — which carries no instruction
+     * and moves no money. Their presence is how a client can tell a document that paid someone
+     * from a document that merely said it would.
+     */
+    private Long paymentId;
+    private BigDecimal disbursedAmount;
 }

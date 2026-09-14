@@ -10,6 +10,7 @@ import org.learning.mldsa.services.FileTransferService;
 import org.learning.mldsa.services.Iso20022Payload;
 import org.learning.mldsa.services.Pain001GenerationService;
 import org.learning.mldsa.services.PdfGenerationService;
+import org.learning.mldsa.services.SlipDisbursementService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,6 +41,7 @@ public class SlipController {
     private final PdfGenerationService pdfGenerationService;
     private final Pain001GenerationService pain001GenerationService;
     private final FileTransferService fileTransferService;
+    private final SlipDisbursementService slipDisbursementService;
     private final UserRepositories userRepositories;
 
     /**
@@ -58,6 +60,14 @@ public class SlipController {
                 .orElseThrow(() -> new RuntimeException("Sender not found"));
         User receiver = userRepositories.findById(request.getReceiverId())
                 .orElseThrow(() -> new RuntimeException("Receiver not found"));
+
+        // Checked before anything is rendered, signed or stored: approving this slip will move
+        // real money between these two accounts, so a slip naming an account that cannot be
+        // paid is refused now, while its author is still looking at the form, rather than in
+        // someone else's inbox days later. The authoritative check runs again at approval,
+        // against the accounts named in the signed payload.
+        slipDisbursementService.requireDisbursable(
+                request.getPayerAccount(), request.getPayeeAccount(), sender, receiver);
 
         // Minted here, at origination, and then used by both the payload and the transfer.
         String uetr = UUID.randomUUID().toString();

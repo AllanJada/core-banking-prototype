@@ -448,9 +448,14 @@ Named deliberately, so their absence isn't mistaken for oversight:
 - **Reserve funding operations** (the Central Bank crediting an institution's settlement
   account). Positions start at zero and move only through payments, bounded by the net debit
   cap if Q1 is accepted.
-- **ISO 20022 `pacs.008`** for the inter-bank leg. It was skipped earlier because the system
-  wasn't a clearing participant. This pivot makes the Central Bank a settlement operator, so
-  it becomes relevant, but it's a follow-up rather than part of this plan.
-- **Payroll disbursement from slips.** A slip's payer and payee could eventually move real
-  money between real accounts, which is a natural extension once institutions own accounts.
+- ~~**ISO 20022 `pacs.008`** for the inter-bank leg.~~ **Since implemented** (2026-09-13), as
+  the follow-up this entry anticipated: every inter-bank payment now writes a signed
+  `pacs.008.001.08`, generated from the official schema and stored encrypted, readable by the
+  two banks party to it and the Central Bank. See the README section and
+  `bank-backend/scripts/verify-iso20022-pacs008.sh`.
+- ~~**Payroll disbursement from slips.**~~ **Since implemented** (2026-09-13), as this entry
+  anticipated: a slip's payer and payee now move real money between real accounts. The
+  receiving institution's approval executes the instruction, through the ordinary payment path,
+  so an inter-bank payroll settles and produces a `pacs.008` like any other. See
+  `bank-backend/scripts/verify-slip-disbursement.sh`.
 - KMS/HSM key custody, which remains deferred to the deployment stage.

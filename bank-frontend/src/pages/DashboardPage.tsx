@@ -20,14 +20,17 @@ import {
   Typography,
 } from "@mui/material";
 import DescriptionIcon from "@mui/icons-material/DescriptionOutlined";
+import DownloadIcon from "@mui/icons-material/DownloadOutlined";
 import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
 import { useNavigate } from "react-router-dom";
 import {
   downloadFile,
+  downloadInstitutionSettlementMessage,
   downloadPayload,
   getInbox,
   getInstitutionPayments,
+  getInstitutionSettlementMessages,
   getInstitutionSummary,
   getMyCustomers,
   getOutbox,
@@ -40,9 +43,15 @@ import { usePagedResource } from "../hooks/usePagedResource";
 import ProvisionCustomerDialog from "../components/ProvisionCustomerDialog";
 import SlipComposerDialog from "../components/SlipComposerDialog";
 import TransferReviewDialog from "../components/TransferReviewDialog";
-import type { Customer, FileTransfer, InstitutionPayment, InstitutionSummary } from "../types";
+import type {
+  Customer,
+  FileTransfer,
+  InstitutionPayment,
+  InstitutionSummary,
+  SettlementMessage,
+} from "../types";
 
-type Section = "overview" | "customers" | "payments" | "inbox" | "outbox";
+type Section = "overview" | "customers" | "payments" | "messages" | "inbox" | "outbox";
 
 function money(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -105,6 +114,7 @@ export default function DashboardPage() {
   // says we are, and returns one page at a time rather than the whole list.
   const customers = usePagedResource<Customer>(getMyCustomers);
   const payments = usePagedResource<InstitutionPayment>(getInstitutionPayments);
+  const messages = usePagedResource<SettlementMessage>(getInstitutionSettlementMessages);
   const inbox = usePagedResource<FileTransfer>(getInbox);
   const outbox = usePagedResource<FileTransfer>(getOutbox);
 
@@ -166,6 +176,14 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleDownloadMessage(message: SettlementMessage) {
+    try {
+      await downloadInstitutionSettlementMessage(message.messageId, message.uetr);
+    } catch (err) {
+      setSnackbar(err instanceof Error ? err.message : "Could not download the settlement message");
+    }
+  }
+
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
@@ -222,6 +240,7 @@ export default function DashboardPage() {
             <Tab label="Overview" value="overview" />
             <Tab label={`Customers (${customers.totalElements})`} value="customers" />
             <Tab label={`Payments (${payments.totalElements})`} value="payments" />
+            <Tab label={`Messages (${messages.totalElements})`} value="messages" />
             <Tab label={`Inbox (${inbox.totalElements})`} value="inbox" />
             <Tab label={`Outbox (${outbox.totalElements})`} value="outbox" />
           </Tabs>
@@ -391,6 +410,68 @@ export default function DashboardPage() {
                   </Table>
                 </TableContainer>
                 <Pager {...payments} onPageChange={payments.setPage} />
+              </>
+            )}
+
+            {tab === "messages" && (
+              <>
+                <TableContainer>
+                  <Table size="small" sx={{ minWidth: 720 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Direction</TableCell>
+                        <TableCell>Counterparty bank</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                        <TableCell>Message</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {messages.items.length === 0 && !messages.loading && (
+                        <TableRow>
+                          <TableCell colSpan={5}>
+                            <Typography variant="body2" color="text.secondary">
+                              No interbank messages yet. One is written for every payment that
+                              crosses banks; payments within this bank need none.
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {messages.items.map((message) => (
+                        <TableRow key={message.messageId}>
+                          <TableCell>{formatDate(message.createdAt)}</TableCell>
+                          <TableCell>
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              color={message.direction === "SENT" ? "warning" : "info"}
+                              label={message.direction === "SENT" ? "Sent" : "Received"}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {message.direction === "SENT"
+                              ? message.creditorAgentCode
+                              : message.debtorAgentCode}
+                          </TableCell>
+                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                            {money(message.amount, message.currency)}
+                          </TableCell>
+                          <TableCell>
+                            {/* Re-hashed and signature-checked server-side before it is served. */}
+                            <Button
+                              size="small"
+                              startIcon={<DownloadIcon />}
+                              onClick={() => handleDownloadMessage(message)}
+                            >
+                              {message.messageType}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+                <Pager {...messages} onPageChange={messages.setPage} />
               </>
             )}
 

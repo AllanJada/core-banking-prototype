@@ -18,6 +18,7 @@ import type {
   PaymentRequest,
   Posting,
   Settlement,
+  SettlementMessage,
   SettlementRefusal,
   SlipRequest,
   User,
@@ -142,6 +143,73 @@ export async function getAdminSettlementRefusals(
     { headers: authHeaders() }
   );
   return handleResponse<Page<SettlementRefusal>>(response);
+}
+
+/**
+ * The ISO 20022 interbank messages the signed-in institution is a party to, sent and
+ * received. A message between two other banks is not returned at all.
+ */
+export async function getInstitutionSettlementMessages(
+  page?: number,
+  size?: number
+): Promise<Page<SettlementMessage>> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/institution/settlement-messages${pageQuery(page, size)}`,
+    { headers: authHeaders() }
+  );
+  return handleResponse<Page<SettlementMessage>>(response);
+}
+
+/** Every interbank message, for the Central Bank as settlement operator. */
+export async function getAdminSettlementMessages(
+  page?: number,
+  size?: number
+): Promise<Page<SettlementMessage>> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/admin/settlement/messages${pageQuery(page, size)}`,
+    { headers: authHeaders() }
+  );
+  return handleResponse<Page<SettlementMessage>>(response);
+}
+
+/**
+ * Downloads a pacs.008 as XML.
+ *
+ * The backend re-hashes the stored message and re-checks its signature before serving it, so
+ * a failure here means the instruction no longer matches what was signed — not merely that a
+ * file was missing.
+ */
+async function downloadSettlementMessageFrom(path: string, uetr: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers: authHeaders() });
+
+  if (!response.ok) {
+    let message = `Could not download the settlement message (${response.status})`;
+    try {
+      const body: ApiErrorBody = await response.json();
+      if (body.message) message = body.message;
+    } catch {
+      // Not JSON — keep the generic message.
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `pacs008-${uetr}.xml`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+export function downloadInstitutionSettlementMessage(messageId: number, uetr: string): Promise<void> {
+  return downloadSettlementMessageFrom(`/api/v1/institution/settlement-messages/${messageId}/xml`, uetr);
+}
+
+export function downloadAdminSettlementMessage(messageId: number, uetr: string): Promise<void> {
+  return downloadSettlementMessageFrom(`/api/v1/admin/settlement/messages/${messageId}/xml`, uetr);
 }
 
 /** The signed-in institution's own aggregates and settlement position. */
