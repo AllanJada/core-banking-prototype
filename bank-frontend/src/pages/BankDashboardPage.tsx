@@ -225,7 +225,7 @@ export default function BankDashboardPage() {
                   <Stat
                     label="Payments refused"
                     value={String(summary.failedPayments)}
-                    hint="recorded with a reason"
+                    // hint="recorded with a reason"
                   />
                 </Stack>
                 <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
