@@ -1,4 +1,4 @@
-pg# A Secure Core Banking System
+# A Secure Core Banking System
 
 Status: work in progress
 
