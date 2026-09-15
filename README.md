@@ -1,4 +1,4 @@
-# A Secure Core Banking System
+pg# A Secure Core Banking System
 
 Status: work in progress
 
@@ -646,7 +646,50 @@ quantum resistance becomes a priority again.
 Full detail on each of these is maintained separately in the project's research
 documents rather than duplicated here.
 
+## Running with Docker
+
+The whole system — Postgres, the backend with its headless Chromium, and the frontend
+behind nginx — comes up with one command. Nothing below needs Java, Maven, Node or
+Postgres installed locally.
+
+```
+cp .env.example .env     # then edit it; see the notes in the file
+docker compose up --build
+```
+
+Then open **http://localhost:5173**. The first build takes several minutes (Maven
+downloads, and the Playwright base image is large); subsequent builds reuse the cached
+dependency layers.
+
+| Service | Image | Published at |
+|---|---|---|
+| `frontend` | nginx serving the built Vite bundle | http://localhost:5173 |
+| `backend` | Spring Boot on JRE 26, on Playwright's Chromium image | http://localhost:8080 |
+| `db` | `postgres:17-alpine` | not published; reachable only inside the compose network |
+
+Notes on how it is wired:
+
+- **The API is same-origin.** The frontend bundle is built with an empty
+  `VITE_API_BASE_URL`, so it calls `/api/v1/...` and nginx proxies that to the backend.
+  The browser never makes a cross-origin request, so CORS is not involved at all.
+- **Startup is ordered.** The backend waits for Postgres to pass `pg_isready`, and the
+  frontend waits for the backend's healthcheck, so Flyway never races an initialising
+  database.
+- **Two volumes hold all the state**: `pgdata` for Postgres and `storage` for the signed
+  payslips and encrypted ISO 20022 payloads. They belong together — the database rows
+  point at those files. `docker compose down -v` destroys both and gives you the empty
+  system the demo walkthrough starts from.
+- **Secrets come from `.env`.** Compose refuses to start without `APP_JWT_SECRET` and
+  `APP_STORAGE_MASTER_KEY`, rather than silently falling back to the DEV ONLY values in
+  `application.properties`, which are public in this repository. Changing
+  `APP_STORAGE_MASTER_KEY` after files exist makes those files permanently unreadable.
+- **Chromium needs room.** The backend service sets `shm_size: 1gb`; Docker's default
+  64MB of shared memory is not enough for Chromium to render a PDF, and it crashes
+  mid-document instead of failing cleanly.
+
 ## Requirements
+
+Only needed when running outside Docker.
 
 - Java 26 (the version the build targets; see `java.version` in `bank-backend/pom.xml`)
 - Maven
