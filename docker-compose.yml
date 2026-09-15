@@ -1,0 +1,70 @@
+name: mldsa
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mldsa}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The backend runs every Flyway migration at startup, so it must not be
+      # allowed to start against a server that is still initialising.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-mldsa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    image: allanjada/mldsa-backend:latest
+    build:
+      context: ./bank-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # These override the values in application.properties — environment
+      # variables outrank the properties file in Spring Boot's precedence order,
+      # so nothing in src has to change to run in a container.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-mldsa}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # No defaults on purpose. The values baked into application.properties are
+      # marked DEV ONLY and are public in the repository: anyone holding the JWT
+      # secret can mint a token for any account, and anyone holding the storage
+      # master key can decrypt every stored file. Copy .env.example to .env.
+      APP_JWT_SECRET: ${APP_JWT_SECRET:?copy .env.example to .env first}
+      APP_STORAGE_MASTER_KEY: ${APP_STORAGE_MASTER_KEY:?copy .env.example to .env first}
+    volumes:
+      # Signed payslips and encrypted ISO 20022 payloads. The database holds the
+      # rows that point at these files, so losing this volume while keeping the
+      # database leaves rows referring to files that are gone.
+      - storage:/app/storage/files
+    ports:
+      - "8080:8080"
+    # Chromium maps its shared memory here, and the 64MB Docker gives by default
+    # is not enough to render a document — it crashes the tab mid-PDF instead.
+    shm_size: 1gb
+    restart: unless-stopped
+
+  frontend:
+    image: allanjada/mldsa-frontend:latest
+    build:
+      context: ./bank-frontend
+      args:
+        # Same-origin: the bundle calls /api/v1/..., nginx forwards it to the
+        # backend over the compose network.
+        VITE_API_BASE_URL: ""
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:
