@@ -203,10 +203,11 @@ against the live database:
 
 | ID | Invariant |
 |---|---|
-| I1 | Every posting effect sums to the total deposited |
+| I1 | Every posting in the ledger nets to exactly zero |
 | I2 | Settlement positions sum to zero, always |
+| I1b | Institution tills hold the negative of everything ever deposited |
 | I3 | Customer balances sum to the total deposited (follows from I1 and I2) |
-| I4 | Every payment's postings net to zero; every deposit's net to its amount |
+| I4 | Every payment's postings net to zero, and so does every deposit's |
 | I5 | An intra-bank payment never writes to a settlement account |
 
 I2 is also computed on every read of `GET /admin/summary` and `GET /admin/settlement`, and the
@@ -475,7 +476,8 @@ what issues a statement about an account (§6.4).
 | `buildEnvelope` | senderId, receiverId, fileHash, filename, sentAt | Direct file uploads (no payload) |
 | `buildCombinedEnvelope` | the above + uetr + xmlHash | Slips with an ISO 20022 payload |
 | `buildPaymentEnvelope` | fromAccount, toAccount, amount, timestamp | Payments |
-| `buildDepositEnvelope` | account, amount, timestamp | Deposits |
+| `buildTellerDepositEnvelope` | account, institution code, amount, timestamp | Deposits (signed by the institution) |
+| `buildDepositEnvelope` | account, amount, timestamp | *Deprecated* — deposits predating tellers |
 | `buildStatementEnvelope` | account, period, opening+closing balance, generatedAt | Statements |
 | `buildSettlementMessageEnvelope` | uetr, both agents' codes, amount, xmlHash, createdAt | Interbank pacs.008 messages |
 

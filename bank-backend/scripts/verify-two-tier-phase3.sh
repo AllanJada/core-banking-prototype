@@ -103,8 +103,11 @@ pay() {
   call POST /payments "$1" "{\"toAccountNumber\":\"$2\",\"amount\":$3,\"description\":\"$4\"}"
 }
 
+# A deposit is a counter operation now: the institution takes it for one of its own
+# customers, so this takes the bank's token and the customer's id rather than the
+# customer's own token. A customer has no deposit route at all.
 deposit() {
-  call POST /payments/deposits "$1" "{\"amount\":$2,\"description\":\"$3\"}"
+  call POST "/institution/customers/$2/deposits" "$1" "{\"amount\":$3,\"description\":\"$4\"}"
 }
 
 position_of() {
@@ -148,10 +151,13 @@ BETA=$(login beta-bank)
 
 call POST /institution/customers "$ALPHA" "{\"username\":\"ann\",\"password\":\"$PASSWORD\"}"
 ANN_ACCOUNT=$(field 'd["accountNumber"]')
+ANN_ID=$(field 'd["userId"]')
 call POST /institution/customers "$ALPHA" "{\"username\":\"amos\",\"password\":\"$PASSWORD\"}"
 AMOS_ACCOUNT=$(field 'd["accountNumber"]')
+AMOS_ID=$(field 'd["userId"]')
 call POST /institution/customers "$BETA" "{\"username\":\"ben\",\"password\":\"$PASSWORD\"}"
 BEN_ACCOUNT=$(field 'd["accountNumber"]')
+BEN_ID=$(field 'd["userId"]')
 call POST /institution/customers "$BETA" "{\"username\":\"bea\",\"password\":\"$PASSWORD\"}"
 BEA_ACCOUNT=$(field 'd["accountNumber"]')
 check "Both banks open their customers' accounts" 201
@@ -160,9 +166,9 @@ ANN=$(login ann)
 AMOS=$(login amos)
 BEN=$(login ben)
 
-deposit "$ANN" 100000 "Opening deposit"
+deposit "$ALPHA" "$ANN_ID" 100000 "Opening deposit"
 check "Ann deposits 100,000" 201
-deposit "$BEN" 50000 "Opening deposit"
+deposit "$BETA" "$BEN_ID" 50000 "Opening deposit"
 check "Ben deposits 50,000" 201
 
 echo "== Intra-bank: two postings, settlement untouched"
@@ -201,7 +207,7 @@ expect_position "Alpha's position recovers to -20,000" ALPHA -20000
 expect_position "Beta's falls to 20,000" BETA 20000
 
 echo "== The net debit cap"
-deposit "$ANN" 5000000 "Large deposit"
+deposit "$ALPHA" "$ANN_ID" 5000000 "Large deposit"
 check "Ann deposits 5,000,000" 201
 
 # Alpha stands at -20,000, so a payment of 4,990,000 would take it past a 5,000,000 cap.
@@ -233,7 +239,7 @@ check "A payment inside the cap still settles" 201
 expect_position "Alpha's position is now -4,020,000" ALPHA -4020000
 
 echo "== A concurrent pair of inter-bank payments from one institution"
-deposit "$AMOS" 600000 "Funding"
+deposit "$ALPHA" "$AMOS_ID" 600000 "Funding"
 check "Amos is funded" 201
 
 # Headroom is 980,000. Two payments of 500,000 fired together are affordable one at a time and
@@ -263,10 +269,20 @@ expect_position "…leaving Alpha inside its cap" ALPHA -4520000
 sql_true "…and never past it" "select abs($(position_of ALPHA)) <= $NET_DEBIT_CAP"
 
 echo "== Invariants against the database (I1-I5)"
-sql_true "I1  every posting effect sums to the total deposited" \
-  "select (select coalesce(sum(case when direction = 'CREDIT' then amount else -amount end), 0)
-           from ledger.postings)
-        = (select coalesce(sum(amount), 0) from payments.deposits)"
+# Stronger than it used to be. This once read "every posting effect sums to the total
+# deposited", because a deposit wrote a single credit and money entered the ledger from
+# nowhere. Deposits are now funded from the institution's till, so every movement in the
+# system has two sides and the whole ledger nets to zero.
+sql_true "I1  every posting in the ledger nets to zero" \
+  "select coalesce(sum(case when direction = 'CREDIT' then amount else -amount end), 0) = 0
+   from ledger.postings"
+
+sql_true "I1b tills hold the negative of everything deposited" \
+  "select (select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0)
+           from ledger.postings p
+           join ledger.accounts a on a.account_id = p.account_id
+           where a.account_type = 'CASH')
+        = -(select coalesce(sum(amount), 0) from payments.deposits)"
 
 sql_true "I2  settlement positions sum to zero" \
   "select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0) = 0
@@ -289,12 +305,12 @@ sql_true "I4a every payment's postings net to zero" \
      group by pay.transaction_ref
      having sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end) <> 0)"
 
-sql_true "I4b every deposit's postings net to its amount" \
+sql_true "I4b every deposit's postings net to zero" \
   "select not exists (
      select 1 from payments.deposits d
      join ledger.postings p on p.transaction_ref = d.transaction_ref
-     group by d.transaction_ref, d.amount
-     having sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end) <> d.amount)"
+     group by d.transaction_ref
+     having sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end) <> 0)"
 
 sql_true "I5  no intra-bank payment ever touches a settlement account" \
   "select not exists (

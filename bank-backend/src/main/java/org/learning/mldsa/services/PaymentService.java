@@ -62,26 +62,36 @@ public class PaymentService {
     private BigDecimal netDebitCap;
 
     /**
-     * Credits the caller's own account.
+     * Takes a deposit at the counter: the institution's till is debited and its customer's
+     * account credited, as one two-sided movement.
      *
-     * The per-transaction and daily caps deliberately do not apply: they exist to bound
-     * what can leave an account, and a deposit only ever adds.
+     * The caller is responsible for having established that this account is one of this
+     * institution's own customers — InstitutionService resolves it within the signed-in
+     * institution before calling here, so another bank's customer is never reached.
+     *
+     * The per-transaction and daily caps deliberately do not apply: they exist to bound what
+     * can leave a <em>customer's</em> account, and this only adds to one. The till is allowed
+     * to go negative — that balance is what the institution has put into circulation, and
+     * making it visible is the point of funding deposits from an account at all.
      */
     @Transactional
-    public Deposit deposit(Long userId, BigDecimal amount, String description) {
+    public Deposit depositByInstitution(User institution, Account account,
+                                        BigDecimal amount, String description) {
         requireWellFormedAmount(amount);
 
-        Account account = accountService.requireAccountFor(userId);
+        Account till = accountService.requireCashAccount(institution.getUserId());
         Instant depositedAt = Instant.now();
 
-        String envelope = cryptoService.buildDepositEnvelope(
-                account.getAccountNumber(), amount, depositedAt.toEpochMilli());
-        String signature = cryptoService.sign(envelope, ownerPrivateKey(account));
+        String envelope = cryptoService.buildTellerDepositEnvelope(
+                account.getAccountNumber(), institution.getInstitutionCode(), amount,
+                depositedAt.toEpochMilli());
+        String signature = cryptoService.sign(envelope, cryptoService.signingKeyOf(institution));
 
-        String transactionRef = accountService.credit(account, amount, description);
+        String transactionRef = accountService.transfer(till, account, amount, description);
 
         Deposit deposit = new Deposit();
         deposit.setAccount(account);
+        deposit.setInstitution(institution);
         deposit.setAmount(amount);
         deposit.setDescription(description);
         deposit.setTransactionRef(transactionRef);

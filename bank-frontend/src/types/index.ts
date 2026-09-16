@@ -271,6 +271,18 @@ export interface DepositRequest {
   description: string;
 }
 
+/** What the counter reads back after taking a deposit. */
+export interface DepositResult {
+  depositId: number;
+  accountNumber: string;
+  amount: number;
+  description: string | null;
+  transactionRef: string;
+  signature: string;
+  depositedAt: string;
+  balanceAfter: number;
+}
+
 export interface PaymentRequest {
   toAccountNumber: string;
   amount: number;

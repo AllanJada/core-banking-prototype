@@ -200,9 +200,37 @@ public class CryptoService {
                 + canonicalAmount(amount) + "|" + xmlHash + "|" + createdAtEpochMilli;
     }
 
-    /** Canonical signed form of a deposit — same shape, with no counterparty. */
+    /**
+     * Canonical signed form of a deposit — same shape, with no counterparty.
+     *
+     * Kept for deposits recorded before deposits were a teller operation. They were signed in
+     * exactly this form with the account holder's key, and rebuilding their envelope any other
+     * way would fail to verify against the signature actually stored.
+     *
+     * @deprecated new deposits use {@link #buildTellerDepositEnvelope}, which names the
+     * institution that took the money and is signed by it.
+     */
+    @Deprecated
     public String buildDepositEnvelope(String accountNumber, BigDecimal amount, long timestampEpochMilli) {
         return accountNumber + "|" + canonicalAmount(amount) + "|" + timestampEpochMilli;
+    }
+
+    /**
+     * Canonical signed form of a deposit taken at the counter.
+     *
+     * Names the institution as well as the account, because the institution is what this
+     * signature asserts: this bank received this money and credited this account. Without it
+     * two banks' deposits of the same amount into the same account at the same moment would
+     * produce identical envelopes, and neither signature would say who took the cash.
+     *
+     * A separate builder rather than an extra parameter on the original, for the reason
+     * buildCombinedEnvelope is separate: every envelope this system has signed must stay
+     * rebuildable in the form it was signed.
+     */
+    public String buildTellerDepositEnvelope(String accountNumber, String institutionCode,
+                                              BigDecimal amount, long timestampEpochMilli) {
+        return accountNumber + "|" + institutionCode + "|"
+                + canonicalAmount(amount) + "|" + timestampEpochMilli;
     }
 
     /**

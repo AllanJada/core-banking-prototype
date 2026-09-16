@@ -83,9 +83,9 @@ public class UserService {
     /**
      * Licenses an institution and opens its settlement account.
      *
-     * One transaction for both: an institution without a settlement account would have
-     * nowhere for an inter-bank payment to settle, and nothing in the system would know how to
-     * repair that.
+     * One transaction for all three: an institution without a settlement account would have
+     * nowhere for an inter-bank payment to settle, and one without a cash account could take
+     * no deposits. Nothing in the system would know how to repair either.
      *
      * @return the settlement account, whose owner and institution are the new institution
      */
@@ -105,7 +105,12 @@ public class UserService {
                 ? null
                 : request.getBic().trim().toUpperCase());
 
-        return accountService.openSettlementAccount(userRepositories.save(institution));
+        User saved = userRepositories.save(institution);
+        // Both accounts in the same transaction as the institution itself, for the same
+        // reason: one with nowhere to settle could not be paid across banks, and one with no
+        // till could not take a deposit. Neither is repairable from outside this method.
+        accountService.openCashAccount(saved);
+        return accountService.openSettlementAccount(saved);
     }
 
     /**

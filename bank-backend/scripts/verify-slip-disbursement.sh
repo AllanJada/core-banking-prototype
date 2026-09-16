@@ -160,6 +160,7 @@ BETA=$(login beta-bank)
 
 call POST /institution/customers "$ALPHA" "{\"username\":\"employer\",\"password\":\"$PASSWORD\"}"
 EMPLOYER_ACCOUNT=$(field 'd["accountNumber"]')
+EMPLOYER_ID=$(field 'd["userId"]')
 call POST /institution/customers "$ALPHA" "{\"username\":\"alpha-other\",\"password\":\"$PASSWORD\"}"
 ALPHA_OTHER_ACCOUNT=$(field 'd["accountNumber"]')
 call POST /institution/customers "$BETA" "{\"username\":\"staffer\",\"password\":\"$PASSWORD\"}"
@@ -167,7 +168,7 @@ STAFFER_ACCOUNT=$(field 'd["accountNumber"]')
 check "Open the employer's and the employee's accounts" 201
 
 EMPLOYER=$(login employer)
-call POST /payments/deposits "$EMPLOYER" '{"amount":1000000,"description":"Payroll float"}'
+call POST "/institution/customers/$EMPLOYER_ID/deposits" "$ALPHA" '{"amount":1000000,"description":"Payroll float"}'
 check "Fund the employer with 1,000,000" 201
 
 echo "== A slip naming accounts that cannot be paid is refused before it is ever sent"
@@ -249,10 +250,20 @@ check "Beta approves it" 200
 assert "…and nothing is disbursed" 'd["paymentId"] is None'
 
 echo "== The ledger is still sound"
-sql_true "I1  every posting effect sums to the total deposited" \
-  "select (select coalesce(sum(case when direction = 'CREDIT' then amount else -amount end), 0)
-           from ledger.postings)
-        = (select coalesce(sum(amount), 0) from payments.deposits)"
+# Stronger than it used to be. This once read "every posting effect sums to the total
+# deposited", because a deposit wrote a single credit and money entered the ledger from
+# nowhere. Deposits are now funded from the institution's till, so every movement in the
+# system has two sides and the whole ledger nets to zero.
+sql_true "I1  every posting in the ledger nets to zero" \
+  "select coalesce(sum(case when direction = 'CREDIT' then amount else -amount end), 0) = 0
+   from ledger.postings"
+
+sql_true "I1b tills hold the negative of everything deposited" \
+  "select (select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0)
+           from ledger.postings p
+           join ledger.accounts a on a.account_id = p.account_id
+           where a.account_type = 'CASH')
+        = -(select coalesce(sum(amount), 0) from payments.deposits)"
 sql_true "I2  settlement positions sum to zero" \
   "select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0) = 0
    from ledger.postings p

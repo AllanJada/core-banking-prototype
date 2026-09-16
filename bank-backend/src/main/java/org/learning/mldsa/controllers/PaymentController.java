@@ -1,14 +1,11 @@
 package org.learning.mldsa.controllers;
 
 import lombok.RequiredArgsConstructor;
-import org.learning.mldsa.dtos.DepositRequest;
 import org.learning.mldsa.dtos.PageResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
-import org.learning.mldsa.dtos.DepositResponse;
 import org.learning.mldsa.dtos.PaymentRequest;
 import org.learning.mldsa.dtos.PaymentResponse;
 import org.learning.mldsa.models.Account;
-import org.learning.mldsa.models.Deposit;
 import org.learning.mldsa.models.Payment;
 import org.learning.mldsa.security.AuthenticatedUser;
 import org.learning.mldsa.services.PaymentService;
@@ -40,14 +37,10 @@ public class PaymentController {
 
     private final PaymentService paymentService;
 
-    @PostMapping("/deposits")
-    ResponseEntity<DepositResponse> deposit(
-            @RequestBody DepositRequest request,
-            @AuthenticationPrincipal AuthenticatedUser user
-    ) {
-        Deposit deposit = paymentService.deposit(user.userId(), request.getAmount(), request.getDescription());
-        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(deposit));
-    }
+    // POST /deposits used to live here, letting a customer credit their own account by any
+    // amount. It moved to InstitutionController: a deposit is a counter operation, taken by
+    // the bank that received the money. A customer who can deposit into their own account can
+    // create money, and every balance in the system would rest on that being trusted.
 
     @PostMapping
     ResponseEntity<PaymentResponse> pay(
@@ -90,14 +83,4 @@ public class PaymentController {
         );
     }
 
-    private static DepositResponse toResponse(Deposit deposit) {
-        return new DepositResponse(
-                deposit.getDepositId(),
-                deposit.getAccount().getAccountNumber(),
-                deposit.getAmount(),
-                deposit.getDescription(),
-                deposit.getTransactionRef(),
-                deposit.getDepositedAt()
-        );
-    }
 }

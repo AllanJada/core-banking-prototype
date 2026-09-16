@@ -6,6 +6,7 @@ import type {
   Customer,
   DebitCard,
   DepositRequest,
+  DepositResult,
   FileTransfer,
   Institution,
   InstitutionPayment,
@@ -495,14 +496,25 @@ export async function blockCard(): Promise<DebitCard> {
   return handleResponse<DebitCard>(response);
 }
 
-/** Pays money into the signed-in customer's own account. */
-export async function deposit(request: DepositRequest): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/v1/payments/deposits`, {
-    method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(request),
-  });
-  await handleResponse<unknown>(response);
+/**
+ * Takes a deposit for one of the signed-in institution's customers.
+ *
+ * An institution call, not a customer one: the customer has no deposit route of their own,
+ * because an account holder who can credit their own account can create money.
+ */
+export async function depositForCustomer(
+  customerId: number,
+  request: DepositRequest,
+): Promise<DepositResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/institution/customers/${customerId}/deposits`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(request),
+    },
+  );
+  return handleResponse<DepositResult>(response);
 }
 
 /**

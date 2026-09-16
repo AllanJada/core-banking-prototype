@@ -20,7 +20,6 @@ import {
   Typography,
 } from "@mui/material";
 import LogoutIcon from "@mui/icons-material/LogoutOutlined";
-import AddIcon from "@mui/icons-material/AddOutlined";
 import SendIcon from "@mui/icons-material/SendOutlined";
 import LinkIcon from "@mui/icons-material/LinkOutlined";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
@@ -34,7 +33,7 @@ import {
   getMyPostings,
 } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import MoneyMovementDialog, { type MoneyMovementMode } from "../components/MoneyMovementDialog";
+import SendMoneyDialog from "../components/SendMoneyDialog";
 import Pager from "../components/Pager";
 import { usePagedResource } from "../hooks/usePagedResource";
 import RequestPaymentDialog from "../components/RequestPaymentDialog";
@@ -102,7 +101,7 @@ export default function AccountPage() {
   const payments = usePagedResource<Payment>(getMyPayments);
   const links = usePagedResource<PaymentLink>(getMyPaymentLinks);
   const [error, setError] = useState<string | null>(null);
-  const [dialogMode, setDialogMode] = useState<MoneyMovementMode | null>(null);
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
   const [snackbar, setSnackbar] = useState<string | null>(null);
   // Defaults to the current month so far, the range most people want.
@@ -207,19 +206,15 @@ export default function AccountPage() {
             <Typography variant="h4" sx={{ fontWeight: 700 }}>
               {account ? formatMoney(account.balance, account.currency) : "—"}
             </Typography>
-            {/* Wraps rather than overflowing: three actions do not fit one phone-width row. */}
+            {/* Wraps rather than overflowing: these do not fit one phone-width row.
+                There is deliberately no Deposit button — paying money in is done at the
+                counter by the bank, because an account holder who can credit their own
+                account can create money. */}
             <Stack direction="row" sx={{ pt: 2, flexWrap: "wrap", gap: 1.5 }}>
               <Button
                 variant="contained"
-                startIcon={<AddIcon />}
-                onClick={() => setDialogMode("deposit")}
-              >
-                Deposit
-              </Button>
-              <Button
-                variant="outlined"
                 startIcon={<SendIcon />}
-                onClick={() => setDialogMode("payment")}
+                onClick={() => setPaymentDialogOpen(true)}
               >
                 Send money
               </Button>
@@ -453,10 +448,9 @@ export default function AccountPage() {
         </Paper>
       </Container>
 
-      <MoneyMovementDialog
-        open={dialogMode !== null}
-        mode={dialogMode ?? "deposit"}
-        onClose={() => setDialogMode(null)}
+      <SendMoneyDialog
+        open={paymentDialogOpen}
+        onClose={() => setPaymentDialogOpen(false)}
         onCompleted={(message) => {
           setSnackbar(message);
           refresh();

@@ -57,21 +57,47 @@ response, and a unique constraint doing the real enforcement. Applies to `/payme
 
 *Size: medium, and it touches every money-moving endpoint, so it is cheaper now than later.*
 
-### 2.3 Anyone can create money
+### 2.3 Anyone can create money — **done**
 
-`POST /payments/deposits` lets a customer credit their own account by any amount, unsigned by
-anyone but themselves and unbounded. Every balance in the system traces back to this.
+`POST /payments/deposits` let a customer credit their own account by any amount, unsigned by
+anyone but themselves and unbounded. Every balance in the system traced back to this.
 
-That is fine for a demonstration and fatal for anything else: deposits should originate from a
-teller, a cash-in device, or an inbound interbank credit — never from the account holder's own
-session. Invariants I1 and I3 are stated in terms of "total deposited", so they will happily
-confirm a ledger built on invented money.
+Two separate faults, and the second was the worse one. The customer was the wrong actor — but
+underneath that, `AccountService.credit()` wrote a *single* credit posting with no
+counterparty. A single-entry operation in a double-entry ledger: money appeared, and the
+ledger's central claim held everywhere except at the point all the money came from. Moving the
+button to a teller alone would have made money creation attributable without making it
+balanced.
 
-**Fix:** move deposits behind the institution (a teller operation on
-`InstitutionController`), or model them as inbound settlement. Keep the customer-facing route
-only under a clearly named demo flag.
+**Done:**
 
-*Size: small mechanically, but it changes the system's story, so decide deliberately.*
+- Deposits moved to `POST /institution/customers/{id}/deposits`, resolved within the signed-in
+  institution, so another bank's customer is not found rather than credited. The customer-facing
+  route is gone, not flagged.
+- A new `AccountType.CASH` — the institution's till, opened with its settlement account at
+  licensing. A deposit is now `transfer(till → customer)`: two postings, one `transactionRef`.
+- `credit()` deleted rather than left unused, so no future caller can create money with it.
+- Deposits are signed by the **institution** now (`buildTellerDepositEnvelope`, which names the
+  institution code), not by the beneficiary attesting to money they had not paid in.
+- `V6__teller_deposits.sql` backfills tills for existing institutions and writes the missing
+  debit side of every historical deposit, dated to the original deposit rather than to the
+  migration.
+
+Invariants got stronger rather than being reworded around the problem:
+
+| | Before | Now |
+|---|---|---|
+| I1 | every posting effect sums to the total deposited | **every posting in the ledger nets to zero** |
+| I1b | — | tills hold the negative of everything deposited |
+| I4b | every deposit's postings net to its amount | every deposit's postings net to **zero** |
+
+Verified against a real database: on the demo data the ledger-wide sum went from 1,000,000 to
+**0.00**, and CRDB's till reads −1,000,000 — the money it has put into circulation, now a
+number on an account instead of an absence of one.
+
+**Still open:** per-teller limits, a four-eyes threshold for large deposits (the payslip
+approve/disburse split is the pattern), and where the till's own money comes from — the Central
+Bank issuing it is the natural next step and completes the three-tier story.
 
 ### 2.4 Everything is a 400
 

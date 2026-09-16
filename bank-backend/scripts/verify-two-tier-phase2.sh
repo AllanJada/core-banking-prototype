@@ -114,6 +114,7 @@ BETA=$(login beta-bank)
 echo "== Account and card numbers carry the issuing bank"
 call POST /institution/customers "$ALPHA" "{\"username\":\"ann\",\"password\":\"$PASSWORD\"}"
 check "Alpha opens Ann's account" 201
+ANN_ID=$(field 'd["userId"]')
 ANN_ACCOUNT=$(field 'd["accountNumber"]')
 [[ ${#ANN_ACCOUNT} == 16 && $ANN_ACCOUNT == "$ALPHA_NUMBER"* ]]
 assert "Ann's 16-digit account number starts with Alpha's bank number" $? "$ANN_ACCOUNT vs $ALPHA_NUMBER"
@@ -149,7 +150,7 @@ check "Ann reads her account" 200
 assert "…which names her institution" $? "$RESPONSE"
 
 echo "== A statement, signed by the institution"
-call POST /payments/deposits "$ANN" '{"amount":100000,"description":"Opening deposit"}'
+call POST "/institution/customers/$ANN_ID/deposits" "$ALPHA" '{"amount":100000,"description":"Opening deposit"}'
 check "Ann deposits 100,000" 201
 call POST /payments "$ANN" "{\"toAccountNumber\":\"$AMOS_ACCOUNT\",\"amount\":5000,\"description\":\"Lunch\"}"
 check "Ann pays Amos 5,000" 201
