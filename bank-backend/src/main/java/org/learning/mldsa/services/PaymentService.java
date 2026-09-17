@@ -153,6 +153,19 @@ public class PaymentService {
                     "Amount exceeds the per-transaction limit of " + maxPerTransaction);
         }
 
+        // Everything from here reads the payer's position and then decides on it, so the row
+        // is locked first. Without this, two payments submitted at the same instant both read
+        // the balance before either had posted, both found it sufficient, and both went
+        // through — leaving the account overdrawn on a system that offers no overdraft. The
+        // checks above need no lock: neither of them reads anything that another payment
+        // could be changing underneath them.
+        //
+        // This is the same treatment the paying bank's settlement account already gets one
+        // level down, for the same reason and in the same order: payer first, then their
+        // bank's position. Every path that moves money arrives here, so that order is the
+        // only order in which these two rows are ever taken.
+        lockForUpdate(from);
+
         // Overdrafts are not offered: a payment that would take the account below zero is
         // refused rather than allowed to run a negative balance.
         BigDecimal balance = accountService.balanceOf(from.getAccountId());
@@ -258,6 +271,18 @@ public class PaymentService {
                 to == null ? null : to.getAccountId(),
                 amount, description, reason, detail);
         return new RuntimeException(reason);
+    }
+
+    /**
+     * Takes the payer's row for the rest of the transaction, so another payment from the same
+     * account waits rather than reading a balance that is about to change.
+     *
+     * The returned row is discarded: this is called for the lock, not the data. The account is
+     * already loaded, and re-reading it here would only invite the two copies to disagree.
+     */
+    private void lockForUpdate(Account account) {
+        accountRepository.findByIdForUpdate(account.getAccountId())
+                .orElseThrow(() -> new RuntimeException("Account no longer exists"));
     }
 
     private Account requireSettlementForUpdate(User institution) {

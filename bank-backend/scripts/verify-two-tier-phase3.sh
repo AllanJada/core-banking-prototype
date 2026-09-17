@@ -160,6 +160,7 @@ BEN_ACCOUNT=$(field 'd["accountNumber"]')
 BEN_ID=$(field 'd["userId"]')
 call POST /institution/customers "$BETA" "{\"username\":\"bea\",\"password\":\"$PASSWORD\"}"
 BEA_ACCOUNT=$(field 'd["accountNumber"]')
+BEA_ID=$(field 'd["userId"]')
 check "Both banks open their customers' accounts" 201
 
 ANN=$(login ann)
@@ -267,6 +268,66 @@ else
 fi
 expect_position "…leaving Alpha inside its cap" ALPHA -4520000
 sql_true "…and never past it" "select abs($(position_of ALPHA)) <= $NET_DEBIT_CAP"
+
+echo "== A concurrent pair of payments from one account"
+# The same race one level down: not the bank's position this time, but a single customer's
+# balance. Bea is funded with exactly 300,000 and then asked for two payments of 200,000 at
+# once — affordable one at a time, impossible together. A balance that is read and then acted
+# on without locking the row lets both through and leaves the account at -100,000, which the
+# ledger permits because nothing forbids a negative sum and I3 still holds. The promise being
+# defended is the README's: no overdrafts, ever.
+# A customer of its own, created here rather than reused from above. Bea is the payee of one
+# of the two concurrent payments in the previous block, so whether she holds 0 or 500,000 more
+# depends on which of those won — and a test whose premise depends on a race it already ran is
+# a test that passes for the wrong reason half the time.
+call POST /institution/customers "$BETA" "{\"username\":\"bianca\",\"password\":\"$PASSWORD\"}"
+BIANCA_ACCOUNT=$(field 'd["accountNumber"]')
+BIANCA_ID=$(field 'd["userId"]')
+check "Beta opens Bianca's account" 201
+
+deposit "$BETA" "$BIANCA_ID" 300000 "Funding for the balance race"
+check "Bianca is funded with exactly 300,000" 201
+sql_true "…and holds exactly that, with nothing else paid in" \
+  "select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0) = 300000
+   from ledger.postings p
+   join ledger.accounts a on a.account_id = p.account_id
+   where a.account_number = '$BIANCA_ACCOUNT'"
+
+BIANCA=$(login bianca)
+curl -s -o "$WORK_DIR/bal-a" -w '%{http_code}' -X POST "$API/payments" \
+  -H "Authorization: Bearer $BIANCA" -H 'Content-Type: application/json' \
+  -d "{\"toAccountNumber\":\"$BEN_ACCOUNT\",\"amount\":200000,\"description\":\"Balance race A\"}" \
+  > "$WORK_DIR/bal-a.code" &
+curl -s -o "$WORK_DIR/bal-b" -w '%{http_code}' -X POST "$API/payments" \
+  -H "Authorization: Bearer $BIANCA" -H 'Content-Type: application/json' \
+  -d "{\"toAccountNumber\":\"$BEN_ACCOUNT\",\"amount\":200000,\"description\":\"Balance race B\"}" \
+  > "$WORK_DIR/bal-b.code" &
+wait
+
+BAL_A=$(cat "$WORK_DIR/bal-a.code")
+BAL_B=$(cat "$WORK_DIR/bal-b.code")
+BAL_OK=0
+[[ $BAL_A == 201 ]] && BAL_OK=$((BAL_OK + 1))
+[[ $BAL_B == 201 ]] && BAL_OK=$((BAL_OK + 1))
+if [[ $BAL_OK == 1 ]]; then
+  PASS=$((PASS + 1)); printf '  PASS  Exactly one of the two concurrent payments was paid  [%s, %s]\n' "$BAL_A" "$BAL_B"
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  Both or neither were paid  [%s, %s]\n' "$BAL_A" "$BAL_B"
+fi
+
+sql_true "…and the account was never overdrawn" \
+  "select coalesce(sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end), 0) >= 0
+   from ledger.postings p
+   join ledger.accounts a on a.account_id = p.account_id
+   where a.account_number = '$BIANCA_ACCOUNT'"
+
+sql_true "…and no account anywhere holds a negative balance" \
+  "select not exists (
+     select 1 from ledger.postings p
+     join ledger.accounts a on a.account_id = p.account_id
+     where a.account_type = 'CUSTOMER'
+     group by p.account_id
+     having sum(case when p.direction = 'CREDIT' then p.amount else -p.amount end) < 0)"
 
 echo "== Invariants against the database (I1-I5)"
 # Stronger than it used to be. This once read "every posting effect sums to the total
