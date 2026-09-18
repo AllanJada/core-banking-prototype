@@ -115,7 +115,7 @@ database:
 |---|---|---|
 | `identity` | `users` | Identity & Access |
 | `ledger` | `accounts`, `postings` | Ledger |
-| `payments` | `deposits`, `payments`, `payment_links`, `settlement_messages` | Payments |
+| `payments` | `deposits`, `payments`, `payment_links`, `settlement_messages`, `idempotency_keys` | Payments |
 | `cards` | `debit_cards` | Card Services |
 | `filetransfer` | `file_transfers` | File Transfer & Review |
 

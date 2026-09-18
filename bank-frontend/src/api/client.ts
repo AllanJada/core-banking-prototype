@@ -47,6 +47,25 @@ function authHeaders(extra: HeadersInit = {}): HeadersInit {
 }
 
 /**
+ * A fresh idempotency key for one attempt at one operation.
+ *
+ * Generated per call rather than per retry: the point is that a request the browser sends
+ * twice — because the user double-clicked, or because fetch retried a timed-out connection —
+ * carries the same key both times and is therefore executed once. A key regenerated on retry
+ * would defeat the whole mechanism.
+ *
+ * randomUUID needs a secure context, which http://localhost is but a plain-http LAN address
+ * is not, so there is a fallback rather than an exception on the machine of whoever opens
+ * this from another host.
+ */
+function idempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `k-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/**
  * Renders the paging query string.
  *
  * Omits absent values so the backend applies its own defaults rather than this deciding
@@ -466,7 +485,10 @@ export async function downloadStatement(from: string, to: string): Promise<void>
 export async function issueCard(pin: string): Promise<DebitCard> {
   const response = await fetch(`${API_BASE_URL}/api/v1/cards`, {
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: authHeaders({
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey(),
+    }),
     body: JSON.stringify({ pin }),
   });
   return handleResponse<DebitCard>(response);
@@ -510,7 +532,10 @@ export async function depositForCustomer(
     `${API_BASE_URL}/api/v1/institution/customers/${customerId}/deposits`,
     {
       method: "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
+      headers: authHeaders({
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey(),
+      }),
       body: JSON.stringify(request),
     },
   );
@@ -526,7 +551,10 @@ export async function depositForCustomer(
 export async function sendPayment(request: PaymentRequest): Promise<Payment> {
   const response = await fetch(`${API_BASE_URL}/api/v1/payments`, {
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: authHeaders({
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey(),
+    }),
     body: JSON.stringify(request),
   });
   return handleResponse<Payment>(response);
@@ -569,7 +597,7 @@ export async function getPaymentLink(linkId: string): Promise<PaymentLink> {
 export async function payPaymentLink(linkId: string): Promise<Payment> {
   const response = await fetch(`${API_BASE_URL}/api/v1/payment-links/${linkId}/pay`, {
     method: "POST",
-    headers: authHeaders(),
+    headers: authHeaders({ "Idempotency-Key": idempotencyKey() }),
   });
   return handleResponse<Payment>(response);
 }

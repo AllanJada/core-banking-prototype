@@ -1,6 +1,7 @@
 package org.learning.mldsa.configs;
 
 import lombok.RequiredArgsConstructor;
+import org.learning.mldsa.security.IdempotencyFilter;
 import org.learning.mldsa.security.JwtAuthenticationFilter;
 import org.learning.mldsa.security.RestAuthenticationErrorHandler;
 import org.springframework.context.annotation.Bean;
@@ -12,6 +13,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -28,6 +30,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final IdempotencyFilter idempotencyFilter;
     private final RestAuthenticationErrorHandler authenticationErrorHandler;
 
     @Bean
@@ -57,7 +60,11 @@ public class SecurityConfig {
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationErrorHandler)
                         .accessDeniedHandler(authenticationErrorHandler))
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // After authorization, not before it: a key is claimed per caller, so there
+                // has to be a caller, and a request that is about to be refused for its role
+                // should be refused rather than handed a claim on a key it never used.
+                .addFilterAfter(idempotencyFilter, AuthorizationFilter.class);
         return http.build();
     }
 

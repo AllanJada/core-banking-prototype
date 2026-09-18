@@ -154,6 +154,15 @@ src
   answer. Nothing that did not happen is signed, and no refused payment has postings
 - Payments settle synchronously, so there is no PENDING state: a payment either completed
   or it moved no money at all
+- **A payment is never made twice by accident.** Concurrent payments from one account are
+  serialised on that account's row, so two sent at the same instant cannot both read the
+  balance before either has posted — the account cannot be overdrawn by racing itself
+- **Retries are safe.** Send an `Idempotency-Key` header on a payment, a deposit, a card
+  issue or a pay-by-link, and a repeat of that request is answered with the first response
+  rather than executed again. The header is optional and requests without it behave as
+  before. Reusing a key for a *different* request is refused (422) rather than answered
+  with the wrong response, and a key used by a refused request is released so the client
+  can genuinely retry
 
 ### Inter-Bank Settlement
 
