@@ -24,6 +24,7 @@ Companion documents sit beside this one:
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The shape of the whole system at once: request path, data model, security model |
 | [`DATABASE-SCHEMA.md`](DATABASE-SCHEMA.md) | Every table and column, the DDL to create them, and the invariant queries |
 | [`REMAINING-WORK.md`](REMAINING-WORK.md) | What is missing or wrong, honestly  including defects that can lose money today |
+| [`ZKP-NOIR-ROADMAP.md`](ZKP-NOIR-ROADMAP.md) | The build plan for zero-knowledge proofs with Noir — toolchain, milestones and the decisions that are expensive to reverse |
 | [`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md) | The two-tier restructure and the decisions behind it |
 
 ## Tech Stack

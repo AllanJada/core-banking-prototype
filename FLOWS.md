@@ -479,6 +479,12 @@ fn main(posting_hash: Field, index: Field, path: [Field; 20], root: pub Field) {
 }
 ```
 
+> **Out of date as written.** `std::merkle` was removed from the Noir standard library —
+> there is no `merkle.nr` in it as of v1.0.0-rc.3. Merkle path verification is now code we
+> write ourselves. See [`ZKP-NOIR-ROADMAP.md`](ZKP-NOIR-ROADMAP.md) §0, which carries the
+> current toolchain state; the two commitment circuits above are still valid, because
+> `pedersen_hash` remains in the stdlib.
+
 ### 6.5 Running Noir from a Spring Boot system
 
 There is no JVM-native Noir prover or verifier; proving and verifying run through `nargo` and
