@@ -64,12 +64,57 @@ exists, decide:
 - **Where the commitment lives:** a new table. It must be queryable by an outside verifier
   without the customer's help, or the customer becomes a trusted intermediary and the point is
   lost.
-- **Salt custody:** the prover needs the salt to prove. If the bank holds it and the customer
-  proves, the bank must hand it over — and anyone holding `(value, salt)` can verify the
-  commitment directly. Decide whether the salt is per-commitment, and who stores it, **before**
-  the first commitment is written.
 
-### 1.2 Field encoding for signed amounts
+### 1.2 Java must not compute the commitment — and this reorders the milestones
+
+The obvious shape is: Java computes `pedersen_hash([balance, salt])`, signs it, stores it; the
+circuit recomputes it and checks the match. **Do not build that.**
+
+Noir's `pedersen_hash` runs on the **Grumpkin** curve — BN254's embedded curve — with generators
+derived as Keccak-256 outputs mapped onto group elements. There is no JVM library implementing
+it, and matching it by hand means reimplementing Aztec's exact generator derivation plus
+Grumpkin arithmetic. A discrepancy anywhere in that produces a hash that is *silently different*,
+and the resulting failure is a hash mismatch across a field-arithmetic boundary between two
+languages, with no useful error on either side.
+
+The deeper objection is structural rather than practical: this would be **two implementations of
+one function**, permanently. They would have to agree across every future toolchain upgrade.
+
+So: **one implementation only.** The sidecar wraps `bb`, which already has Pedersen; it gains a
+`commit` endpoint; Java calls it, stores the returned commitment, and signs that with the
+existing Ed25519 key. Java never does field arithmetic, and the value that gets signed is
+produced by the same code the circuit will check against.
+
+**Consequence: the sidecar is infrastructure, not a later milestone.** It has to exist before the
+first commitment is written, which is why M1 below is the sidecar and commitments follow it.
+
+### 1.3 Salt custody is a privacy decision, not a storage one
+
+The prover needs the salt, so if the customer proves, the bank must release it. Two things follow
+that are easy to miss:
+
+- **A salt does not expire.** Anyone who has ever seen `(value, salt)` can verify that commitment
+  forever. A customer who proves solvency once, to one counterparty, has handed that counterparty
+  a permanent ability to confirm that exact balance.
+- **Therefore salts must be per-commitment**, not per-account. That bounds the damage to a single
+  period rather than to every balance the account ever held.
+
+Decide this before the first commitment is written. Changing it afterwards invalidates everything
+already signed, because the commitments cannot be recomputed — the inputs may be gone.
+
+### 1.4 Version the commitment scheme from the first row
+
+Noir is at a release candidate (§0), and breaking changes between candidates are normal. The
+asymmetry that matters: **a circuit can be rewritten, but a commitment in the database is
+permanent.** If `pedersen_hash`'s parameterisation changes, every stored commitment becomes
+unverifiable with no migration path — you cannot recompute them, because the entire point is that
+you may no longer hold the inputs.
+
+So `ledger.commitments` carries a `scheme_version` from the first migration, recording which hash
+and which toolchain version produced each root. Trivial to include now; impossible to retrofit
+onto rows whose inputs are gone.
+
+### 1.5 Field encoding for signed amounts
 
 Noir `Field` elements have no signed comparison. Settlement positions go negative routinely, so
 any circuit touching a position carries an offset (`FLOWS.md` §6.4(b) shows the shape).
@@ -82,13 +127,18 @@ one past it, maximum negative) before trusting any proof built on it.
 Money is `numeric(19,2)` in the ledger. Circuits should work in **integer minor units**
 (cents), converted once at the boundary, never in decimals.
 
-### 1.3 Where verification happens
+### 1.6 Where proving and verifying happen
 
 `FLOWS.md` §6.5 chose a **verifier sidecar** over JNI or on-chain. That still holds, and the
 precedent is stronger than it was: this repo already runs a specialised engine out-of-process
 for exactly this reason — `PdfGenerationService` drives headless Chromium through Playwright,
 and the Docker setup already builds on Playwright's own image. A `bb` sidecar is the same shape
 of decision, and the compose file is the place it goes.
+
+§1.2 widens its job: it is not only the verifier but the single owner of every Pedersen
+operation in the system. Verification of a *customer's* proof still happens wherever the
+verifier is — and the proof for M3 must be generated **in the browser**, or it demonstrates
+nothing (§5).
 
 ---
 
@@ -103,7 +153,7 @@ mldsa/
   bank-frontend/         unchanged
   zk/
     circuits/
-      proof_of_funds/    Nargo.toml, src/main.nr   — milestone M2
+      proof_of_funds/    Nargo.toml, src/main.nr   — milestone M3
       cap_compliance/    Nargo.toml, src/main.nr   — milestone M4
       common/            shared: commitment, merkle path, encoding
     sidecar/             bb wrapper: HTTP verify + prove
@@ -134,33 +184,49 @@ Prove the toolchain works on this machine before designing around it.
 
 **Done when:** a proof verifies from the command line, and the numbers are written down. If
 proving a toy circuit is already slow on this hardware, that changes the plan — better to learn
-it now than at M4.
+it now than at M3, where the proving happens on a customer's phone.
 
 **Deliberately throwaway.** Nothing from M0 ships.
 
-### M1 — Commitments, with no circuits at all
+### M1 — The sidecar, before anything commits
 
-This is the precondition from `FLOWS.md` §6.2, and it is worth doing on its own merits: it makes
-the ledger tamper-evident even if no proof is ever generated.
+This was originally scheduled after the commitments and the first circuit. It moved to the front
+for the reason in §1.2: it owns every Pedersen operation in the system, so it has to exist
+before the first commitment is written. Nothing verifies proofs yet — this milestone exists to
+make one implementation of the hash rather than two.
+
+- Small HTTP service wrapping `bb`, pinned by digest: `commit` (fields → commitment) and
+  `verify` (`{circuit, proof, publicInputs}` → boolean).
+- `ProofService` in Java calls it. Java never does field arithmetic.
+- Added to `docker-compose.yml` alongside the existing three services.
+
+**Done when:** the same inputs produce the same commitment from the sidecar and from a Noir
+circuit asserting `pedersen_hash(inputs) == expected`. That equality is the entire point of the
+milestone, and it must be demonstrated, not assumed — it is what the M2 commitments will rest on.
+
+**Also done when:** the existing six suites still pass with the sidecar **absent**. Everything ZKP
+must be additive; a dead sidecar degrades to "unverified", never to "refused". This holds for
+every milestone after it too.
+
+### M2 — Commitments, with no circuits at all
+
+The precondition from `FLOWS.md` §6.2, and worth doing on its own merits: it makes the ledger
+tamper-evident even if no proof is ever generated.
 
 - `LedgerCommitmentService`: for an account and period, build a Merkle tree over that account's
-  postings and publish the root.
+  postings and publish the root. Hashing goes through the M1 sidecar.
 - Sign the root with the institution's key — reusing `CryptoService`, with a **new envelope
   builder**, following the convention this codebase already enforces (every envelope ever signed
   must stay rebuildable in the form it was signed).
-- Migration `V8`: `ledger.commitments` — account, period, root, salt policy, signature, signed-at.
+- Migration `V8`: `ledger.commitments` — account, period, root, `scheme_version` (§1.4),
+  signature, signed-at. Salts are per-commitment (§1.3).
 - A balance commitment per account/period: `pedersen_hash([balance_minor_units, salt])`.
 
 **Done when:** a verification script rebuilds a root independently from the postings table and
-gets the same value the service stored; and altering one posting changes the root. Both checks
-belong in SQL and a script, not in the service that produced them.
+gets the value the service stored; and altering one posting changes the root. Both checks belong
+in SQL and a script, not in the service that produced them.
 
-**Note this needs a Pedersen implementation in Java** to build the same commitment the circuit
-will check. That is the first real integration cost, and it is worth confirming a usable one
-exists before committing to `pedersen_hash` — if not, the sidecar grows a `commit` endpoint and
-Java stops computing commitments itself.
-
-### M2 — Proof of funds (the flagship)
+### M3 — Proof of funds (the flagship)
 
 The case from `FLOWS.md` §6.3(a): a customer proves they hold at least X without handing over a
 statement showing every transaction.
@@ -170,45 +236,40 @@ statement showing every transaction.
 - Prove in the browser with `noir_js`, so the balance and salt never leave the customer's
   machine. **If proving happens server-side, this milestone proves nothing** — the server
   already knows the balance.
-
-**Done when:** a proof generated in the browser verifies with `bb verify` on the command line,
-against a commitment the bank signed, and the balance appears nowhere in the proof or the public
-inputs. That last part wants checking by actually reading the artefacts, not by assuming.
-
-**Negative tests, which are the ones that matter:** a proof for a balance *below* the threshold
-must fail to verify; a proof against a *different* commitment must fail; a tampered public input
-must fail.
-
-### M3 — The verifier sidecar
-
-Only now does the Java system need to verify anything.
-
-- Small HTTP service wrapping `bb verify`: `{circuit, proof, publicInputs}` → boolean.
-- `ProofVerificationService` in Java calls it.
-- Added to `docker-compose.yml` alongside the existing three services.
 - Store results the way signatures already are: `FileTransfer` carries `signature` and
   `signatureValid` side by side; a proof carries `proof`, `publicInputs` and `proofValid` in the
   same shape, with a `ProofChip` in the UI mirroring `SignatureChip`.
 
-**Done when:** the existing six suites still pass with the sidecar absent — proof verification
-must be *additive*, never a new way for a payment to fail. A dead sidecar should degrade to
-"unverified", not "refused".
+**Done when:** a proof generated in the browser verifies through the M1 sidecar *and* with
+`bb verify` on the command line, against a commitment the bank signed — and the balance appears
+nowhere in the proof or the public inputs. That last part wants checking by reading the
+artefacts, not by assuming.
+
+**Negative tests, which are the ones that matter:** a proof for a balance *below* the threshold
+must fail; a proof against a *different* commitment must fail; a tampered public input must fail.
+
+**Decide the demo beat before writing the circuit.** This is the hardest thing in the project to
+demonstrate, because nothing visibly happens — that is the point. The framing that works is a
+contrast: the same customer, first the statement PDF showing every transaction, then a proof
+showing only "≥ 5,000,000". That choice determines what the public inputs should be, so make it
+first.
 
 ### M4 — Cap compliance
 
 `FLOWS.md` §6.3(b): an institution proves its position stays within its net debit cap without
 revealing the position.
 
-- Circuit `cap_compliance`, using the offset encoding decided in §1.2.
+- Circuit `cap_compliance`, using the offset encoding decided in §1.5.
 - Verified at `AdminService.settlement` instead of reading positions directly.
 
 **Boundary tests are the deliverable here**, not the happy path: position exactly at the cap, one
 minor unit past it, and the maximum negative position the encoding permits.
 
-**Honest note:** in this deployment one database holds every bank, so the Central Bank can simply
-compute the position itself. This milestone is a *demonstration* of the mechanism that would
-matter if the tiers were genuinely separate systems — which is worth building and worth saying
-plainly when presenting it.
+**Worth deciding whether to build at all.** In this deployment one database holds every bank, so
+the Central Bank can simply compute the position itself — this milestone demonstrates a mechanism
+that would matter only if the tiers were genuinely separate systems. That is a legitimate thing
+to build and a legitimate thing to skip; what it is not is a thing to present as though the
+Central Bank could not already see the answer.
 
 ### M5 — Only if the tiers ever separate
 
@@ -224,13 +285,15 @@ Not scheduled. Listed so the order is visible.
 
 | Milestone | Java | New |
 |---|---|---|
-| M1 | `CryptoService` (new envelope builder), `AccountService` (read postings) | `LedgerCommitmentService`, `V8` migration |
-| M2 | `StatementService` gains a sibling that emits a commitment rather than a document | `zk/circuits/proof_of_funds` |
-| M3 | — | `ProofVerificationService`, sidecar, compose service, `ProofChip` |
+| M1 | `ProofService` (calls the sidecar; no field arithmetic) | sidecar, compose service |
+| M2 | `CryptoService` (new envelope builder), `AccountService` (read postings) | `LedgerCommitmentService`, `V8` migration |
+| M3 | `StatementService` gains a sibling that emits a commitment rather than a document | `zk/circuits/proof_of_funds`, `ProofChip` |
 | M4 | `AdminService.settlement`, `PaymentService` inter-bank branch | `zk/circuits/cap_compliance` |
 
-Nothing before M3 requires the Java system to change behaviour, which is deliberate: M1 and M2
-can be built and demonstrated without touching a single existing code path.
+Nothing through M3 changes the behaviour of an existing code path: M1 adds a service nothing yet
+calls, M2 writes a new table, and M3's verifier is the customer's counterparty rather than this
+system. M4 is the first milestone where an existing decision — the Central Bank reading a
+settlement position — is replaced rather than supplemented.
 
 ---
 
@@ -240,14 +303,22 @@ can be built and demonstrated without touching a single existing code path.
   the commitment is wrong, the proof is still valid. This is the single most common way ZKP
   systems are misunderstood, and §6.6 says it too — it bears repeating because it is the one
   that invalidates everything else.
-- **Proving server-side defeats the purpose** for M2. If the server can see the balance, it
+- **Proving server-side defeats the purpose** for M3. If the server can see the balance, it
   gains nothing from a proof about it.
-- **The circuit is code, and can be wrong.** The offset encoding in §1.2 is a live example: a
+- **The circuit is code, and can be wrong.** The offset encoding in §1.5 is a live example: a
   wrong encoding yields valid proofs of false statements, with no error anywhere.
+- **One hash, one implementation.** Computing the commitment in both Java and Noir would be two
+  implementations of one function that must agree forever, across a curve the JVM has no library
+  for. §1.2 is why the sidecar owns it.
+- **A wrong circuit does not throw.** Every defect this project has fixed recently announced
+  itself — an overdrawn balance, a duplicate row, a failed assertion. This class does not, which
+  is why the negative tests in M3 and the boundary tests in M4 *are* the deliverable rather than
+  a courtesy. It is also the strongest argument for doing REMAINING-WORK §6.1 first: there is
+  currently no harness to hang those tests on.
 - **Toolchain drift.** Noir is at a *release candidate*. Expect breaking changes; pin versions
   and expect to re-pin deliberately.
 - **Proving time is the user's time.** Browser proving on a mid-range phone is the constraint to
-  measure at M0, not to discover at M2.
+  measure at M0, not to discover at M3.
 - **Proofs do not replace I1–I5.** Those check the ledger is internally consistent. A proof says
   "I know values matching this commitment" — it says nothing about whether the commitment
   described the whole ledger.
@@ -267,12 +338,14 @@ can be built and demonstrated without touching a single existing code path.
 ## 7. Suggested first session
 
 1. **M0**, end to end, and write down the timings.
-2. Decide §1.1 (salt custody) and §1.2 (offset encoding) — on paper, in this document.
-3. Confirm a usable Java Pedersen implementation exists, or decide the sidecar computes
-   commitments instead.
+2. Settle §1.5 (offset encoding) on paper, in this document. §1.2, §1.3 and §1.4 are already
+   decided above — the sidecar owns the hash, salts are per-commitment, and the scheme is
+   versioned from the first row — but they are decisions, so disagree with them now rather than
+   after commitments exist.
+3. Choose the M3 demo framing, because it determines the circuit's public inputs.
 
-Only then start M1. Steps 2 and 3 are the ones that are expensive to get wrong later, and
-neither requires writing a circuit to settle.
+Only then start M1. None of these requires writing a circuit, and all of them are expensive to
+revisit once data has been signed.
 
 ---
 
