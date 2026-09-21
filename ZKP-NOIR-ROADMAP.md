@@ -1,6 +1,6 @@
 # Adding Zero-Knowledge Proofs with Noir — Implementation Roadmap
 
-Status: plan only. Nothing here is built yet.
+Status: plan, with M0 (the toolchain spike) done — see §8. No production code yet.
 
 [`FLOWS.md` §6](FLOWS.md) already argues *where* zero-knowledge proofs fit this system and
 *why* — the three distrust boundaries, the commitment precondition, and what ZKP would not
@@ -80,13 +80,24 @@ languages, with no useful error on either side.
 The deeper objection is structural rather than practical: this would be **two implementations of
 one function**, permanently. They would have to agree across every future toolchain upgrade.
 
-So: **one implementation only.** The sidecar wraps `bb`, which already has Pedersen; it gains a
-`commit` endpoint; Java calls it, stores the returned commitment, and signs that with the
-existing Ed25519 key. Java never does field arithmetic, and the value that gets signed is
-produced by the same code the circuit will check against.
+So: **one implementation only.** The sidecar owns every Pedersen operation; Java calls it, stores
+the returned commitment, and signs that with the existing Ed25519 key. Java never does field
+arithmetic, and the value that gets signed is produced by the same code the circuit checks
+against.
 
 **Consequence: the sidecar is infrastructure, not a later milestone.** It has to exist before the
 first commitment is written, which is why M1 below is the sidecar and commitments follow it.
+
+**The sidecar is Node, not a shell wrapper around `bb`** — established at M0 (§8). The `bb` CLI
+has only `prove`, `write_vk`, `verify` and some Aztec-specific commands; it exposes no hashing
+subcommand at all, so there is nothing to shell out to. `@aztec/bb.js` — the same Barretenberg,
+compiled to WASM — does expose `pedersenHash`, and **its output was confirmed identical to the
+Noir circuit's** at M0. That settles the choice: the sidecar is a small Node service over
+`@aztec/bb.js`, pinned to the same version as `bb`.
+
+This is better than the shell-wrapper plan rather than merely different. The browser proving path
+in M3 uses `noir_js` over the same `bb.js`, so prover and verifier share one library — the "one
+implementation" property holds across the browser boundary too, not just inside the server.
 
 ### 1.3 Salt custody is a privacy decision, not a storage one
 
@@ -156,9 +167,10 @@ mldsa/
       proof_of_funds/    Nargo.toml, src/main.nr   — milestone M3
       cap_compliance/    Nargo.toml, src/main.nr   — milestone M4
       common/            shared: commitment, merkle path, encoding
-    sidecar/             bb wrapper: HTTP verify + prove
+    sidecar/             Node service over @aztec/bb.js: commit + verify (§1.2, §8)
     scripts/
       verify-zkp.sh      the suite, in the style of the existing six
+    .toolchain/          nargo and bb, pinned per-repo; versions.txt records what and why
     README.md            how to install the toolchain and run the circuits
 ```
 
@@ -174,19 +186,10 @@ Each is independently useful and independently verifiable. The rule this project
 follows applies: **a milestone is done when something outside the application confirms it**,
 not when the code looks right.
 
-### M0 — Toolchain spike (half a day)
+### M0 — Toolchain spike — **done**, see §8
 
-Prove the toolchain works on this machine before designing around it.
-
-- Install `noirup`, pin `nargo` v1.0.0-rc.3 and `bb` v5.2.0.
-- `nargo new`, a circuit asserting `x != y`, `nargo execute`, `bb prove`, `bb verify`.
-- Record wall-clock proving time and proof size.
-
-**Done when:** a proof verifies from the command line, and the numbers are written down. If
-proving a toy circuit is already slow on this hardware, that changes the plan — better to learn
-it now than at M3, where the proving happens on a customer's phone.
-
-**Deliberately throwaway.** Nothing from M0 ships.
+Prove the toolchain works on this machine before designing around it. Results and the three
+findings that came out of it are in §8; the code was throwaway and nothing from it ships.
 
 ### M1 — The sidecar, before anything commits
 
@@ -346,6 +349,67 @@ settlement position — is replaced rather than supplemented.
 
 Only then start M1. None of these requires writing a circuit, and all of them are expensive to
 revisit once data has been signed.
+
+**Step 1 is done** — see §8. Steps 2 and 3 remain, and neither needs a machine.
+
+---
+
+## 8. M0 results (2026-09-21)
+
+Run on this machine, against the pinned versions. The spike code was throwaway; the numbers and
+the findings are what it was for.
+
+### Toolchain
+
+Installed **project-local** rather than globally: `zk/.toolchain/toolbin/`, with the versions
+recorded in `zk/.toolchain/versions.txt`. No shell profile was modified and nothing was installed
+system-wide, so the pin is per-repo and removing the directory removes the toolchain.
+
+`nargo 1.0.0-rc.3` · `bb 5.2.0` · `@aztec/bb.js 5.2.0`
+
+### Numbers, for a trivial circuit (`assert(x != y)`)
+
+| Step | Time | Output |
+|---|---|---|
+| `nargo compile` | <1 s | 1.4 KB ACIR |
+| `nargo execute` | <1 s | 96 B witness |
+| `bb write_vk` | 4.2 s | 3.7 KB vk |
+| `bb prove` | 0.58 s | **14.7 KB proof** |
+| `bb verify` | 0.03 s | — |
+
+Scheme is `ultra_honk`, 8 threads. **Proof size is constant-ish for UltraHonk**, so ~14 KB is the
+floor for anything — worth knowing before designing an API that returns proofs. Proving a real
+circuit will be slower than 0.58 s, but the toy case being fast means the hardware is not the
+constraint; circuit size will be.
+
+### Three findings
+
+**1. `bb` has no hashing subcommand — the sidecar must be Node.** The CLI offers `prove`,
+`write_vk`, `verify`, `check`, `gates`, `proof_stats`, `write_solidity_verifier` and some
+Aztec-specific commands. There is no `pedersen`, no `hash`, no `commit`. The plan in §1.2 as
+originally written — "wrap `bb`, add a `commit` endpoint" — had nothing to wrap. `@aztec/bb.js`
+does expose `pedersenHash`, so the sidecar is a Node service over that. §1.2 is updated.
+
+**2. The M1 acceptance criterion already passes.** The whole plan rests on the sidecar and the
+circuit producing the same commitment. Tested directly:
+
+```
+pedersen_hash([500000, 42])
+  Noir circuit : 0x029e62fbf74abb199f8d996ef3bb8bde9f532a9895a93b55aefb02058fa9b9ce
+  @aztec/bb.js : 0x029e62fbf74abb199f8d996ef3bb8bde9f532a9895a93b55aefb02058fa9b9ce
+```
+
+Identical. That is the single riskiest assumption in this document, and it holds — keep this
+vector as a fixture, because it is exactly the regression test for a future toolchain bump.
+
+Note the API shape: `pedersenHash({ inputs: Uint8Array[], hashIndex: number })`, fields as 32-byte
+big-endian buffers. `bb.js` 5.2.0 exports no `Fr` class, so callers do the encoding themselves.
+
+**3. `bb verify` exit codes are trustworthy.** `0` on success, `1` on failure, and a proof with a
+single flipped byte is rejected (`verification failed at reduction step`). The sidecar can key
+off the exit status rather than parsing stdout — but note the failure is still printed to stdout
+rather than stderr, so a naive `bb verify | grep` would read a *failure* as output and succeed.
+Use the exit code.
 
 ---
 
