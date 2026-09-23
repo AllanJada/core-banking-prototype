@@ -2,6 +2,8 @@ package org.learning.mldsa.controllers;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.CustomerResponse;
+import org.learning.mldsa.dtos.DepositRequest;
+import org.learning.mldsa.dtos.DepositResponse;
 import org.learning.mldsa.dtos.InstitutionPaymentResponse;
 import org.learning.mldsa.dtos.InstitutionSummaryResponse;
 import org.learning.mldsa.dtos.PageRequestParams;
@@ -129,6 +131,23 @@ public class InstitutionController {
             @AuthenticationPrincipal AuthenticatedUser institution
     ) {
         return ResponseEntity.ok(institutionService.unblockCard(institution.userId(), customerId));
+    }
+
+    /**
+     * Takes a deposit for one of this institution's customers — the counter operation.
+     *
+     * The customer is addressed by id in the path, but only ever found within the signed-in
+     * institution, so this cannot credit another bank's customer. The institution funding the
+     * deposit is the one holding the token; there is no field here naming a different one.
+     */
+    @PostMapping("/customers/{customerId}/deposits")
+    ResponseEntity<DepositResponse> deposit(
+            @PathVariable Long customerId,
+            @RequestBody DepositRequest request,
+            @AuthenticationPrincipal AuthenticatedUser institution
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(institutionService.depositForCustomer(
+                institution.userId(), customerId, request.getAmount(), request.getDescription()));
     }
 
     /** Served as a file named after the reference it carries, which is also the ledger's. */

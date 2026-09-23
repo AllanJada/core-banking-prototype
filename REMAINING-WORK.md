@@ -15,11 +15,13 @@ It is worth separating them, because they need different work and have different
 
 | Bar | Question it answers | Where this system stands |
 |---|---|---|
-| **Correct** | Does it do what it already claims, under load and abuse? | §2 — a handful of real defects, two of which can lose money |
+| **Correct** | Does it do what it already claims, under load and abuse? | §2 — the three defects that could lose money are fixed (§2.1–§2.3); what remains is error semantics and a card that authorises nothing |
 | **Complete as banking** | Does it have the capabilities a core banking system is expected to have? | §3–§4 — substantial gaps: no reversals, no interest or fees, no account lifecycle, cards move no money |
-| **Production-ready** | Could it be operated, observed and recovered by someone who didn't write it? | §5–§6 — essentially unstarted: no tests in the repo, no CI, no container, no metrics |
+| **Production-ready** | Could it be operated, observed and recovered by someone who didn't write it? | §5–§6 — barely started: a compose stack exists (§6.3), but still no tests in the repo, no CI and no metrics |
 
-§2 is the only section that is urgent. The rest is scope.
+§2 was the only urgent section, and its money-losing items are now closed — see §8 for what
+that leaves. The rest is scope, with the exception of §6.1: without tests in the repository,
+nothing already fixed is guaranteed to stay fixed.
 
 ---
 
@@ -27,51 +29,124 @@ It is worth separating them, because they need different work and have different
 
 These are ordered by what they cost if they bite.
 
-### 2.1 A customer can be overdrawn by concurrent payments
+### 2.1 A customer can be overdrawn by concurrent payments — **done** (`40de835`)
 
-`PaymentService.pay` reads the payer's balance with `accountService.balanceOf(...)` and no lock.
-Two payments submitted at the same instant both read the pre-payment balance, both pass the
-sufficient-funds check, and both post.
+`PaymentService.execute` read the payer's balance with `accountService.balanceOf(...)` and no
+lock. Two payments submitted at the same instant both read the pre-payment balance, both passed
+the sufficient-funds check, and both posted.
 
-**Failure:** balance 100,000; two simultaneous payments of 80,000 each; both succeed; the
-account ends at −60,000, which the ledger permits because nothing forbids a negative sum. The
-"no overdraft, ever" promise in the README is broken, and invariant I3 still holds, so nothing
-detects it.
+**Reproduced before it was fixed**, as a check in `verify-two-tier-phase3.sh`: an account funded
+with exactly 300,000, two payments of 200,000 fired together. Both returned `201` and the
+account ended at −100,000 — while I1, I2 and I3 all still passed. That is the part worth
+remembering: the invariant suite structurally cannot see this class of fault, so it needed a
+test of its own rather than a stronger invariant.
 
-**Fix:** the same pattern already used one level up — the paying bank's settlement account is
-locked before its position is read (`findSettlementForUpdate`, `PESSIMISTIC_WRITE`). The payer's
-own account needs the same treatment before the balance check. Note the daily cap
-(`sumCompletedSince`) has the identical race.
+**Done:** the payer's row is taken before anything that reads it. The daily-cap total
+(`sumCompletedSince`) is read under the same lock, so its identical race closed with the same
+line. Every path that moves money — a customer payment, a payment link, a payroll disbursement —
+arrives at `execute()`, so none of them can skip it.
 
-*Size: small. This is the most important item in the document.*
+**The part that was not obvious.** The fix this entry originally proposed — reuse
+`PESSIMISTIC_WRITE`, as the settlement account does — would have deadlocked every rejection.
+JPA's pessimistic write is Postgres `FOR UPDATE`; inserting a row with a foreign key to a locked
+row needs `FOR KEY SHARE` on it; the two conflict. `FailedPaymentRecorder` writes the FAILED
+payment in its own `REQUIRES_NEW` transaction, and that record has a foreign key to the payer's
+account — so the inner transaction would have blocked on a lock the outer one could not release
+until the inner returned. A refused payment would have hung instead of being refused.
 
-### 2.2 A retried payment pays twice
+`FOR NO KEY UPDATE` is the weaker lock for exactly this case: it still serialises writers, so
+the race stays closed, but it does not conflict with a foreign key reference. Both behaviours
+were checked directly against Postgres before choosing, and the suite proves it end to end — the
+losing payment returns `400 Insufficient funds` rather than hanging. The existing settlement lock
+is unaffected, because a failed-payment row never references a settlement account.
 
-No endpoint takes an idempotency key. A client that times out and retries `POST /payments`
-produces two payments, two sets of postings and — for an inter-bank payment — two `pacs.008`
-messages. Mobile clients on poor connections retry constantly; this is not a hypothetical.
+### 2.2 A retried payment pays twice — **done** (`b0b901a`)
 
-**Fix:** an `Idempotency-Key` header, a table keyed on `(caller, key)` storing the first
-response, and a unique constraint doing the real enforcement. Applies to `/payments`,
-`/payments/deposits`, `/payment-links/{id}/pay` and card issuance.
+No endpoint took an idempotency key. A client that timed out and retried `POST /payments`
+produced two payments, two sets of postings and — for an inter-bank payment — two `pacs.008`
+messages. Mobile clients on poor connections retry constantly; this was never hypothetical.
 
-*Size: medium, and it touches every money-moving endpoint, so it is cheaper now than later.*
+**Done:** an `Idempotency-Key` header, a `payments.idempotency_keys` table keyed on
+`(caller, key)`, and a unique index doing the real enforcement — claiming is an insert that
+either succeeds or violates it, so two duplicates arriving together cannot both find the key
+unclaimed. Reading first and then inserting would have had precisely the race §2.1 was about.
+Implemented as `IdempotencyFilter` rather than four controller checks, so the guarantee cannot
+differ between endpoints.
 
-### 2.3 Anyone can create money
+The header is **optional**: a request without one behaves exactly as before, so clients that
+have not adopted it are unaffected.
 
-`POST /payments/deposits` lets a customer credit their own account by any amount, unsigned by
-anyone but themselves and unbounded. Every balance in the system traces back to this.
+Three decisions worth recording, because they are the ones a reader would otherwise have to
+reverse-engineer:
 
-That is fine for a demonstration and fatal for anything else: deposits should originate from a
-teller, a cash-in device, or an inbound interbank credit — never from the account holder's own
-session. Invariants I1 and I3 are stated in terms of "total deposited", so they will happily
-confirm a ledger built on invented money.
+- The claim is committed **before** the guarded request runs, in its own `REQUIRES_NEW`
+  transaction. Joining the caller's transaction would leave it invisible until the payment had
+  already been made, and would roll it back whenever the request failed.
+- A key reused with a **different body** is refused with `422` rather than answered. Replaying
+  the first response would confirm a payment that was never made.
+- A key is **released** when its request did not succeed. A refusal moved no money, so the client
+  may retry once the reason is gone; holding the key would turn a temporary refusal into a
+  permanent one. Successes are never released.
 
-**Fix:** move deposits behind the institution (a teller operation on
-`InstitutionController`), or model them as inbound settlement. Keep the customer-facing route
-only under a clearly named demo flag.
+Guards `/payments`, `/institution/customers/{id}/deposits`, `/payment-links/{id}/pay` and card
+issuance. Slip composition and file upload are excluded deliberately — two slips are meant to be
+distinguishable, and double approval is already refused by the unique `payment_id` constraint
+from V5.
 
-*Size: small mechanically, but it changes the system's story, so decide deliberately.*
+`verify-idempotency.sh`, 31 checks: a repeated deposit leaves one deposit row and debits the till
+once; a repeated payment pays once; a reused key with a different body is refused; two duplicates
+racing produce exactly one payment; a refused request gives its key back; keys are scoped per
+caller; requests without a key are unaffected.
+
+**Still open:** nothing sweeps old key rows. They are small and only accumulate for requests that
+carried one, but deleting a key makes the request it guarded repeatable again, so a retention
+policy wants deciding rather than defaulting.
+
+### 2.3 Anyone can create money — **done** (`a7a1f4d`)
+
+`POST /payments/deposits` let a customer credit their own account by any amount, unsigned by
+anyone but themselves and unbounded. Every balance in the system traced back to this.
+
+Two separate faults, and the second was the worse one. The customer was the wrong actor — but
+underneath that, `AccountService.credit()` wrote a *single* credit posting with no
+counterparty. A single-entry operation in a double-entry ledger: money appeared, and the
+ledger's central claim held everywhere except at the point all the money came from. Moving the
+button to a teller alone would have made money creation attributable without making it
+balanced.
+
+**Done:**
+
+- Deposits moved to `POST /institution/customers/{id}/deposits`, resolved within the signed-in
+  institution, so another bank's customer is not found rather than credited. The customer-facing
+  route is gone, not flagged.
+- A new `AccountType.CASH` — the institution's till, opened with its settlement account at
+  licensing. A deposit is now `transfer(till → customer)`: two postings, one `transactionRef`.
+- `credit()` deleted rather than left unused, so no future caller can create money with it.
+- A latent bug this surfaced: `AccountService.open()` was idempotent on **owner alone**, so an
+  institution opening a second account type would have been handed back its settlement account
+  — and deposits would have been funded from it. Now keyed on `(owner, type)`, with a unique
+  index enforcing it rather than the application merely intending it.
+- Deposits are signed by the **institution** now (`buildTellerDepositEnvelope`, which names the
+  institution code), not by the beneficiary attesting to money they had not paid in.
+- `V6__teller_deposits.sql` backfills tills for existing institutions and writes the missing
+  debit side of every historical deposit, dated to the original deposit rather than to the
+  migration.
+
+Invariants got stronger rather than being reworded around the problem:
+
+| | Before | Now |
+|---|---|---|
+| I1 | every posting effect sums to the total deposited | **every posting in the ledger nets to zero** |
+| I1b | — | tills hold the negative of everything deposited |
+| I4b | every deposit's postings net to its amount | every deposit's postings net to **zero** |
+
+Verified against a real database: on the demo data the ledger-wide sum went from 1,000,000 to
+**0.00**, and CRDB's till reads −1,000,000 — the money it has put into circulation, now a
+number on an account instead of an absence of one.
+
+**Still open:** per-teller limits, a four-eyes threshold for large deposits (the payslip
+approve/disburse split is the pattern), and where the till's own money comes from — the Central
+Bank issuing it is the natural next step and completes the three-tier story.
 
 ### 2.4 Everything is a 400
 
@@ -206,9 +281,10 @@ card numbers sit unencrypted in the database (files are encrypted at rest; rows 
 
 ### 6.1 There are no tests in the repository
 Verified: the backend has exactly one test, `MldsaApplicationTests.contextLoads`, and the
-frontend has none. The five verification suites are real and thorough, but they are **external**
-— they need a running application, a live Postgres, and an empty database, and they must be run
-in sequence with truncation between them.
+frontend has none. The six verification suites are real and thorough, but they are **external**
+— they need a running application, a live Postgres, and an empty database each. `run-suite.sh`
+now automates that sequence, which removes the footgun but not the dependency: none of these
+checks can run without a live system, so none of them run during a build.
 
 **Fix:** Testcontainers-backed integration tests for the service layer (the ledger invariants,
 tenancy refusals and the settlement cap are perfect candidates), plus unit tests for the pieces
@@ -222,12 +298,21 @@ on it.*
 ### 6.2 No CI
 Verified: no `.github`. Nothing runs `mvn package`, `npm run build`, `oxlint` or the
 verification suites automatically. A workflow that spins up Postgres, migrates, boots the jar
-and runs all five suites would turn this document's §2 items into regressions that can't return.
+and runs all six suites would turn this document's §2 items into regressions that can't return.
+`scripts/run-suite.sh` is the per-suite half of that already written, so a workflow is mostly a
+matter of looping it.
 
-### 6.3 Nothing to deploy with
-No Dockerfile, no compose file, no environment profiles. Running it means Java 26, a local
-Postgres, a Playwright browser download, and hand-set environment variables. A compose file
-covering app + Postgres would also make the verification suites trivially runnable.
+### 6.3 Nothing to deploy with — **mostly done** (`d8eeb8d`, `799b9a6`)
+There is now a `docker-compose.yml` covering Postgres, the backend and the frontend, with a
+Dockerfile for each. The backend image is built on Playwright's own, pinned to the client version
+in `pom.xml`, so the headless Chromium that renders statements and payslips is present and
+matched. Secrets come from `.env`, which compose refuses to start without, rather than from the
+DEV ONLY values in `application.properties`.
+
+**Still open:** no environment profiles — there is one `application.properties` and everything is
+overridden by environment variable. And the compose file has not been run end to end here: the
+network it was written on blocks outbound UDP/53 from containers, so the image builds could not
+be completed. It is unproven rather than known-good.
 
 ### 6.4 No observability
 Verified: no Actuator, no Micrometer. No health or readiness endpoint, no metrics, no structured
@@ -263,19 +348,33 @@ the README, unchanged:
 
 ## 8. A suggested order
 
+**Done so far**, in the order they were taken:
+
+| Work | Commit |
+|---|---|
+| ~~Decide the deposit story (§2.3)~~ | `a7a1f4d` |
+| ~~Lock the payer's account (§2.1)~~ | `40de835` |
+| ~~Idempotency keys (§2.2)~~ | `b0b901a` |
+| ~~Container (§6.3, part)~~ | `d8eeb8d` |
+
+That is every defect in this document that could actually lose money. What is left is scope
+rather than repair, with one exception — item 1 below, which is what stops this list regrowing.
+
+**Next:**
+
 | # | Work | Why here | Size |
 |---|---|---|---|
-| 1 | Lock the payer's account (§2.1) | It can lose money today | S |
-| 2 | Idempotency keys (§2.2) | Same, and cheaper before more endpoints exist | M |
-| 3 | Decide the deposit story (§2.3) | Everything downstream inherits it | S |
-| 4 | Tests in the repo + CI (§6.1, §6.2) | Nothing above stays fixed without this | L |
-| 5 | Error semantics (§2.4) | API contract, cheapest before integrators arrive | S |
-| 6 | Audit trail (§5.4) | Supervised systems need it; ledger gives the model | M |
-| 7 | Reversals (§3.1) | The first genuinely missing banking capability | M |
-| 8 | `pacs.002` + public key endpoint (§4.2, §4.3) | Makes the interbank leg a conversation, and its signatures checkable | M |
-| 9 | Reserve funding and settlement runs (§3.7) | Completes the settlement tier | L |
-| 10 | Card authorisation (§2.5) | Makes the card real; introduces holds | L |
-| 11 | Container + observability (§6.3, §6.4) | Needed before anyone else operates it | M |
+| 1 | Tests in the repo + CI (§6.1, §6.2) | Nothing above stays fixed without this, and there are now six external suites to run | L |
+| 2 | Error semantics (§2.4) | API contract, cheapest before integrators arrive | S |
+| 3 | Audit trail (§5.4) | Supervised systems need it; ledger gives the model | M |
+| 4 | Reversals (§3.1) | The first genuinely missing banking capability | M |
+| 5 | `pacs.002` + public key endpoint (§4.2, §4.3) | Makes the interbank leg a conversation, and its signatures checkable | M |
+| 6 | Central Bank issuance (§2.3, still open) | Completes the three-tier story: today each bank's till simply runs negative | M |
+| 7 | Reserve funding and settlement runs (§3.7) | Completes the settlement tier | L |
+| 8 | Card authorisation (§2.5) | Makes the card real; introduces holds | L |
+| 9 | Observability (§6.4) | Needed before anyone else operates it | M |
 
-Items 1–3 are a day's work between them and remove the defects that can actually cost money.
-Item 4 is what stops this list regrowing.
+Item 1 is now the clear priority, and the last three items made the case for it: each was
+verified by spinning up a database and a backend by hand, in the right order, six times over.
+`scripts/run-suite.sh` automates that sequence, but it is a workaround for the absence of tests
+that can run without a live system, not a substitute for them.

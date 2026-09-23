@@ -1,0 +1,6 @@
+# Toolchain binaries and build output: large, platform-specific, and reproducible
+# from versions.txt. Only source and pinned versions are committed.
+.toolchain/toolbin/
+.m0/
+**/target/
+node_modules/

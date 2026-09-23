@@ -120,6 +120,7 @@ GAMMA=$(login gamma-bank)
 
 call POST /institution/customers "$ALPHA" "{\"username\":\"ann\",\"password\":\"$PASSWORD\"}"
 ANN_ACCOUNT=$(field 'd["accountNumber"]')
+ANN_ID=$(field 'd["userId"]')
 call POST /institution/customers "$ALPHA" "{\"username\":\"amos\",\"password\":\"$PASSWORD\"}"
 AMOS_ACCOUNT=$(field 'd["accountNumber"]')
 call POST /institution/customers "$BETA" "{\"username\":\"ben\",\"password\":\"$PASSWORD\"}"
@@ -127,7 +128,7 @@ BEN_ACCOUNT=$(field 'd["accountNumber"]')
 check "Open customers at two of them" 201
 
 ANN=$(login ann)
-call POST /payments/deposits "$ANN" '{"amount":100000,"description":"Opening deposit"}'
+call POST "/institution/customers/$ANN_ID/deposits" "$ALPHA" '{"amount":100000,"description":"Opening deposit"}'
 check "Ann deposits 100,000" 201
 
 echo "== A payment inside one bank writes no interbank message"

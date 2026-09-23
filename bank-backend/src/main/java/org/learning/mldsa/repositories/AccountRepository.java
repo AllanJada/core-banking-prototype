@@ -66,6 +66,34 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findSettlementForUpdate(@Param("institutionId") Long institutionId);
 
     /**
+     * One account, locked against other writers for the rest of the transaction.
+     *
+     * Taken before a payment reads the balance it is about to check for sufficient funds, so
+     * two payments leaving the same account at once cannot both be told the money is there.
+     * The daily-cap total is read under the same lock and is protected by it too.
+     *
+     * <p><b>Why this is a native query rather than {@code @Lock(PESSIMISTIC_WRITE)}.</b>
+     * JPA's pessimistic write maps to Postgres {@code FOR UPDATE}, which conflicts with the
+     * {@code FOR KEY SHARE} that Postgres takes on a parent row when a foreign key referencing
+     * it is inserted. A refused payment is recorded by FailedPaymentRecorder in its own
+     * REQUIRES_NEW transaction, and that record has a foreign key to this very account — so
+     * under {@code FOR UPDATE} every rejection would block on a lock the outer transaction
+     * cannot release until the inner one returns. A refused payment would hang instead of
+     * being refused.
+     *
+     * <p>{@code FOR NO KEY UPDATE} is the weaker lock that exists for exactly this: it still
+     * serialises writers against each other, so the race this was added to close stays closed,
+     * but it does not conflict with a foreign key reference. Verified both ways against
+     * Postgres before choosing it.
+     */
+    @Query(value = """
+            select * from ledger.accounts
+            where account_id = :accountId
+            for no key update
+            """, nativeQuery = true)
+    Optional<Account> findByIdForUpdate(@Param("accountId") Long accountId);
+
+    /**
      * How many accounts of a type each of the given institutions holds, in one grouped query.
      * An institution with none is absent from the result, which callers read as zero.
      */

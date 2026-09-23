@@ -24,6 +24,7 @@ Companion documents sit beside this one:
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The shape of the whole system at once: request path, data model, security model |
 | [`DATABASE-SCHEMA.md`](DATABASE-SCHEMA.md) | Every table and column, the DDL to create them, and the invariant queries |
 | [`REMAINING-WORK.md`](REMAINING-WORK.md) | What is missing or wrong, honestly  including defects that can lose money today |
+| [`ZKP-NOIR-ROADMAP.md`](ZKP-NOIR-ROADMAP.md) | The build plan for zero-knowledge proofs with Noir — toolchain, milestones and the decisions that are expensive to reverse |
 | [`TWO_TIER_BANKING_PLAN.md`](TWO_TIER_BANKING_PLAN.md) | The two-tier restructure and the decisions behind it |
 
 ## Tech Stack
@@ -131,23 +132,38 @@ src
 
 ### Deposits and Payments
 
-- A deposit credits the customer's own account: one posting, plus a signed record of it
+- A deposit is taken **by the institution**, not the customer: their bank debits its own
+  cash account (its till) and credits the customer, two postings under one transaction ref.
+  A customer has no deposit route — an account holder who can credit their own account can
+  create money, which is what every balance in the system would then rest on
 - A payment moves money between two accounts, identified by account number. Its debit and
   credit are written together in one transaction, so a debit can never be committed
   without its matching credit
-- Each is signed with the customer's own key at the moment it is made, binding the
-  accounts, the amount, and the timestamp  the same generate-then-sign-then-persist
+- A payment is signed with the customer's own key; a deposit with the **institution's**,
+  since the bank is the party claiming it received the money. Each binds the accounts, the
+  amount, and the timestamp  the same generate-then-sign-then-persist
   shape the slip flow uses. Amounts are normalised to two decimal places before signing,
   so the same sum always produces the same signature
 - **No overdrafts**: a payment that would take an account below zero is refused
 - A per-transaction cap and a per-account daily cap (UTC day) bound what can leave an
-  account, both configurable. Deposits are not capped, since they only add
+  account, both configurable. Deposits are not capped, since they only add to a customer's
+  account  and the till they are funded from is allowed to go negative, by exactly what
+  the institution has put into circulation
 - **Refused payments are kept**, with the reason. Because a rejection rolls back the
   transaction that would have made the payment, the record is written in a separate
   transaction so it survives  a customer asking "why didn't that go through" has an
   answer. Nothing that did not happen is signed, and no refused payment has postings
 - Payments settle synchronously, so there is no PENDING state: a payment either completed
   or it moved no money at all
+- **A payment is never made twice by accident.** Concurrent payments from one account are
+  serialised on that account's row, so two sent at the same instant cannot both read the
+  balance before either has posted — the account cannot be overdrawn by racing itself
+- **Retries are safe.** Send an `Idempotency-Key` header on a payment, a deposit, a card
+  issue or a pay-by-link, and a repeat of that request is answered with the first response
+  rather than executed again. The header is optional and requests without it behave as
+  before. Reusing a key for a *different* request is refused (422) rather than answered
+  with the wrong response, and a key used by a refused request is released so the client
+  can genuinely retry
 
 ### Inter-Bank Settlement
 

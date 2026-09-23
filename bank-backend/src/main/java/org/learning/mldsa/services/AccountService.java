@@ -67,6 +67,27 @@ public class AccountService {
     }
 
     /**
+     * Opens the institution's till — the account its tellers' deposits are funded from.
+     *
+     * Opened at the same moment as the settlement account, for the same reason: an institution
+     * that could exist without one would be an institution whose first deposit had nowhere to
+     * come from.
+     */
+    @Transactional
+    public Account openCashAccount(User institution) {
+        if (institution.getRole() != Role.INSTITUTION) {
+            throw new RuntimeException("Only an institution holds a cash account");
+        }
+        return open(institution, institution, AccountType.CASH);
+    }
+
+    /** An institution's till, which must exist before it can take a deposit. */
+    public Account requireCashAccount(Long institutionId) {
+        return accountRepository.findByOwner_UserIdAndType(institutionId, AccountType.CASH)
+                .orElseThrow(() -> new RuntimeException("No cash account is open for this institution"));
+    }
+
+    /**
      * The customer account a user owns.
      *
      * Restricted to CUSTOMER accounts on purpose. Every caller acts for a customer —
@@ -172,13 +193,11 @@ public class AccountService {
         return transactionRef;
     }
 
-    /** Credits an account with no counterparty — what a deposit does. */
-    @Transactional
-    public String credit(Account account, BigDecimal amount, String description) {
-        String transactionRef = newTransactionRef();
-        recordPosting(account, PostingDirection.CREDIT, amount, description, transactionRef);
-        return transactionRef;
-    }
+    // A single-sided credit() used to live here, and a deposit was its only caller. It was
+    // removed rather than left unused: while it existed, any future code could create money
+    // by calling it, and the ledger's guarantee would have been one careless call from
+    // untrue. A deposit is now transfer(institution's till -> customer), which is two-sided
+    // like everything else.
 
     /** A fresh identifier tying together the postings that make up one operation. */
     public String newTransactionRef() {
@@ -186,12 +205,17 @@ public class AccountService {
     }
 
     /**
-     * Idempotent by ownership: an owner who already has an account gets that one back rather
-     * than a second, so retried provisioning can't quietly leave a customer with two accounts
-     * and a split balance.
+     * Idempotent by owner and type: an owner who already has an account of this type gets that
+     * one back rather than a second, so retried provisioning can't quietly leave a customer
+     * with two accounts and a split balance.
+     *
+     * Type is part of the key rather than owner alone because an institution legitimately owns
+     * more than one account — its settlement position and its till. Keyed on the owner only,
+     * opening the second would have handed back the first, and a deposit would have been
+     * funded from the settlement account.
      */
     private Account open(User owner, User institution, AccountType type) {
-        return accountRepository.findByOwner_UserId(owner.getUserId())
+        return accountRepository.findByOwner_UserIdAndType(owner.getUserId(), type)
                 .orElseGet(() -> {
                     Account account = new Account();
                     account.setAccountNumber(generateUniqueAccountNumber(institution));

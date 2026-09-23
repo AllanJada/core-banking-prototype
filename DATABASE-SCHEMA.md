@@ -19,7 +19,7 @@ convenience snapshot of what those migrations produce — see §5 before running
 |---|---|---|
 | `identity` | `users` | Identity & Access |
 | `ledger` | `accounts`, `postings` | Ledger |
-| `payments` | `deposits`, `payments`, `payment_links`, `settlement_messages` | Payments & Settlement |
+| `payments` | `deposits`, `payments`, `payment_links`, `settlement_messages`, `idempotency_keys` | Payments & Settlement |
 | `cards` | `debit_cards` | Card Services |
 | `filetransfer` | `file_transfers` | File Transfer & Review |
 | `public` | `flyway_schema_history` | Flyway |
@@ -93,7 +93,7 @@ The only place money exists. Append-only — the application sets every column `
 | `direction` | `varchar(255)` not null | `CREDIT` \| `DEBIT` — carries the sign |
 | `amount` | `numeric(19,2)` not null | Always positive |
 | `description` | `varchar(255)` | |
-| `transaction_ref` | `varchar(36)` not null | Ties the postings of one operation together: 2 rows for a payment within a bank, 4 across banks, 1 for a deposit |
+| `transaction_ref` | `varchar(36)` not null | Ties the postings of one operation together: 2 rows for a payment within a bank or a deposit, 4 across banks |
 | `posted_at` | `timestamptz` not null | |
 
 *Why the sign lives in `direction`:* a malformed row cannot silently reverse a transaction's
@@ -104,11 +104,12 @@ meaning by having a negative amount misread.
 | Column | Type | Notes |
 |---|---|---|
 | `deposit_id` | `bigint` identity | PK |
-| `account_id` | `bigint` not null | → `ledger.accounts` |
+| `account_id` | `bigint` not null | → `ledger.accounts`, the customer credited |
+| `institution_id` | `bigint` | → `identity.users`, the institution that took it. Null only for deposits predating tellers |
 | `amount` | `numeric(19,2)` not null | |
 | `description` | `varchar(255)` | |
-| `transaction_ref` | `varchar(36)` not null | Joins to the credit posting it produced |
-| `signature` | `varchar(255)` not null | Ed25519 over account, amount, timestamp |
+| `transaction_ref` | `varchar(36)` not null | Joins to **both** postings: the customer's credit and the till's debit |
+| `signature` | `varchar(255)` not null | Ed25519 over account, institution code, amount, timestamp — signed by the institution |
 | `deposited_at` | `timestamptz` not null | |
 
 ### `payments.payments`
@@ -227,6 +228,7 @@ because PostgreSQL does not index a foreign key by itself:
 | `postings_account_idx` | `ledger.postings (account_id)` — every balance sums by account |
 | `accounts_owner_idx` | `ledger.accounts (owner_id)` — every request resolves the caller's own account |
 | `accounts_institution_type_idx` | `ledger.accounts (institution_id, account_type)` — every institution-scoped query |
+| `accounts_owner_type_key` | `ledger.accounts (owner_id, account_type)` unique — one account per owner per type |
 | `settlement_messages_debtor_agent_idx` | `payments.settlement_messages (debtor_agent_id)` |
 | `settlement_messages_creditor_agent_idx` | `payments.settlement_messages (creditor_agent_id)` |
 
@@ -286,7 +288,7 @@ CREATE TABLE ledger.accounts (
     opened_at      timestamp(6) with time zone NOT NULL,
     CONSTRAINT accounts_pkey PRIMARY KEY (account_id),
     CONSTRAINT accounts_account_number_key UNIQUE (account_number),
-    CONSTRAINT accounts_account_type_check CHECK (account_type IN ('CUSTOMER', 'SETTLEMENT')),
+    CONSTRAINT accounts_account_type_check CHECK (account_type IN ('CUSTOMER', 'SETTLEMENT', 'CASH')),
     CONSTRAINT accounts_owner_fk FOREIGN KEY (owner_id) REFERENCES identity.users (user_id),
     CONSTRAINT accounts_institution_fk FOREIGN KEY (institution_id) REFERENCES identity.users (user_id)
 );
@@ -315,8 +317,12 @@ CREATE TABLE payments.deposits (
     transaction_ref varchar(36) NOT NULL,
     signature       varchar(255) NOT NULL,
     deposited_at    timestamp(6) with time zone NOT NULL,
+    -- Last because V6 adds it with ALTER TABLE, and this DDL reproduces the migrated schema
+    -- exactly. Nullable: deposits taken before this was a teller operation were taken by nobody.
+    institution_id  bigint,
     CONSTRAINT deposits_pkey PRIMARY KEY (deposit_id),
-    CONSTRAINT deposits_account_fk FOREIGN KEY (account_id) REFERENCES ledger.accounts (account_id)
+    CONSTRAINT deposits_account_fk FOREIGN KEY (account_id) REFERENCES ledger.accounts (account_id),
+    CONSTRAINT deposits_institution_fk FOREIGN KEY (institution_id) REFERENCES identity.users (user_id)
 );
 
 CREATE TABLE payments.payments (
@@ -379,6 +385,30 @@ CREATE TABLE payments.settlement_messages (
     CONSTRAINT settlement_messages_creditor_agent_fk FOREIGN KEY (creditor_agent_id) REFERENCES identity.users (user_id)
 );
 
+-- A retried request is answered from here rather than executed again. The unique index is the
+-- whole mechanism: claiming a key is an insert that either succeeds or violates it, so two
+-- identical requests arriving together cannot both find the key unclaimed.
+CREATE TABLE payments.idempotency_keys (
+    idempotency_id  bigint GENERATED BY DEFAULT AS IDENTITY,
+    caller_id       bigint NOT NULL,
+    idempotency_key varchar(120) NOT NULL,
+    request_method  varchar(8) NOT NULL,
+    request_path    varchar(255) NOT NULL,
+    -- SHA-256 of the body, so a key reused for a different request is refused rather than
+    -- answered with the first request's response.
+    request_hash    varchar(64) NOT NULL,
+    -- Null while the guarded request is still running.
+    response_status integer,
+    response_body   text,
+    created_at      timestamp(6) with time zone NOT NULL,
+    completed_at    timestamp(6) with time zone,
+    CONSTRAINT idempotency_keys_pkey PRIMARY KEY (idempotency_id),
+    CONSTRAINT idempotency_keys_caller_fk FOREIGN KEY (caller_id) REFERENCES identity.users (user_id)
+);
+
+CREATE UNIQUE INDEX idempotency_keys_caller_key ON payments.idempotency_keys (caller_id, idempotency_key);
+CREATE INDEX idempotency_keys_created_idx ON payments.idempotency_keys (created_at);
+
 -- ---------------------------------------------------------------------------------------
 -- Card Services. No CVV column exists, deliberately.
 -- ---------------------------------------------------------------------------------------
@@ -434,6 +464,9 @@ CREATE TABLE filetransfer.file_transfers (
 CREATE INDEX postings_account_idx ON ledger.postings (account_id);
 CREATE INDEX accounts_owner_idx ON ledger.accounts (owner_id);
 CREATE INDEX accounts_institution_type_idx ON ledger.accounts (institution_id, account_type);
+-- An owner may hold more than one account — an institution has both a settlement position
+-- and a till — but never two of the same type.
+CREATE UNIQUE INDEX accounts_owner_type_key ON ledger.accounts (owner_id, account_type);
 CREATE INDEX settlement_messages_debtor_agent_idx ON payments.settlement_messages (debtor_agent_id);
 CREATE INDEX settlement_messages_creditor_agent_idx ON payments.settlement_messages (creditor_agent_id);
 ```

@@ -34,7 +34,7 @@ Customer (NORMAL_USER)                 banks with exactly one institution
 |---|---|---|
 | Central Bank | License institutions, add overseers, read institution aggregates, read settlement positions/movements/refusals, read every interbank message and file transfer | Create a customer, see a customer's identity or balance, move any money |
 | Institution | Open and list its own customers, unblock their cards, read its own aggregates and settlement position, read its customers' payments, exchange signed documents with other institutions, read interbank messages it is party to | Touch another bank's customers, messages, or payments |
-| Customer | Deposit, pay, request payment by link, hold a card, read their own account/history/statement | See anyone else's account; pay a settlement account; see why settlement failed |
+| Customer | Pay, request payment by link, hold a card, read their own account/history/statement | See anyone else's account; pay a settlement account; see why settlement failed |
 
 Money only ever exists as **postings** in one append-only ledger. Every balance on every
 screen is summed from those postings at the moment it is read.
@@ -169,12 +169,15 @@ used to enumerate usernames.
 ### 3.5 Putting money in
 
 ```
-Customer ──POST /api/v1/payments/deposits──▶ 1 CREDIT posting + a signed deposit record
+Institution ──POST /api/v1/institution/customers/{id}/deposits──▶ DEBIT its till + CREDIT the
+customer, both under one transaction ref, plus a deposit record signed by the institution
 ```
 
 The per-transaction and daily caps deliberately **do not** apply.
 
-*Why:* those caps exist to bound what can *leave* an account; a deposit only adds. The deposit
+*Why:* those caps exist to bound what can *leave* a customer's account; a deposit only adds to
+one. The customer is not the actor here — an account holder who could credit their own account
+could create money. The deposit
 is signed with the customer's key over account, amount and timestamp, because the customer is
 the party asserting the movement.
 
@@ -343,10 +346,11 @@ The invariants themselves:
 
 | ID | Invariant |
 |---|---|
-| I1 | Every posting effect sums to the total deposited |
+| I1 | Every posting in the ledger nets to exactly zero |
 | I2 | Settlement positions sum to zero, always |
+| I1b | Institution tills hold the negative of everything ever deposited |
 | I3 | Customer balances sum to the total deposited |
-| I4 | Every payment's postings net to zero; every deposit's net to its amount |
+| I4 | Every payment's postings net to zero, and so does every deposit's |
 | I5 | An intra-bank payment never writes to a settlement account |
 
 ---
@@ -474,6 +478,12 @@ fn main(posting_hash: Field, index: Field, path: [Field; 20], root: pub Field) {
     assert(std::merkle::compute_merkle_root(posting_hash, index, path) == root);
 }
 ```
+
+> **Out of date as written.** `std::merkle` was removed from the Noir standard library —
+> there is no `merkle.nr` in it as of v1.0.0-rc.3. Merkle path verification is now code we
+> write ourselves. See [`ZKP-NOIR-ROADMAP.md`](ZKP-NOIR-ROADMAP.md) §0, which carries the
+> current toolchain state; the two commitment circuits above are still valid, because
+> `pedersen_hash` remains in the stdlib.
 
 ### 6.5 Running Noir from a Spring Boot system
 

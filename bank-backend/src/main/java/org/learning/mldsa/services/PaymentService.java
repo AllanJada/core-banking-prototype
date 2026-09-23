@@ -62,26 +62,36 @@ public class PaymentService {
     private BigDecimal netDebitCap;
 
     /**
-     * Credits the caller's own account.
+     * Takes a deposit at the counter: the institution's till is debited and its customer's
+     * account credited, as one two-sided movement.
      *
-     * The per-transaction and daily caps deliberately do not apply: they exist to bound
-     * what can leave an account, and a deposit only ever adds.
+     * The caller is responsible for having established that this account is one of this
+     * institution's own customers — InstitutionService resolves it within the signed-in
+     * institution before calling here, so another bank's customer is never reached.
+     *
+     * The per-transaction and daily caps deliberately do not apply: they exist to bound what
+     * can leave a <em>customer's</em> account, and this only adds to one. The till is allowed
+     * to go negative — that balance is what the institution has put into circulation, and
+     * making it visible is the point of funding deposits from an account at all.
      */
     @Transactional
-    public Deposit deposit(Long userId, BigDecimal amount, String description) {
+    public Deposit depositByInstitution(User institution, Account account,
+                                        BigDecimal amount, String description) {
         requireWellFormedAmount(amount);
 
-        Account account = accountService.requireAccountFor(userId);
+        Account till = accountService.requireCashAccount(institution.getUserId());
         Instant depositedAt = Instant.now();
 
-        String envelope = cryptoService.buildDepositEnvelope(
-                account.getAccountNumber(), amount, depositedAt.toEpochMilli());
-        String signature = cryptoService.sign(envelope, ownerPrivateKey(account));
+        String envelope = cryptoService.buildTellerDepositEnvelope(
+                account.getAccountNumber(), institution.getInstitutionCode(), amount,
+                depositedAt.toEpochMilli());
+        String signature = cryptoService.sign(envelope, cryptoService.signingKeyOf(institution));
 
-        String transactionRef = accountService.credit(account, amount, description);
+        String transactionRef = accountService.transfer(till, account, amount, description);
 
         Deposit deposit = new Deposit();
         deposit.setAccount(account);
+        deposit.setInstitution(institution);
         deposit.setAmount(amount);
         deposit.setDescription(description);
         deposit.setTransactionRef(transactionRef);
@@ -142,6 +152,19 @@ public class PaymentService {
             throw reject(from, to, amount, description,
                     "Amount exceeds the per-transaction limit of " + maxPerTransaction);
         }
+
+        // Everything from here reads the payer's position and then decides on it, so the row
+        // is locked first. Without this, two payments submitted at the same instant both read
+        // the balance before either had posted, both found it sufficient, and both went
+        // through — leaving the account overdrawn on a system that offers no overdraft. The
+        // checks above need no lock: neither of them reads anything that another payment
+        // could be changing underneath them.
+        //
+        // This is the same treatment the paying bank's settlement account already gets one
+        // level down, for the same reason and in the same order: payer first, then their
+        // bank's position. Every path that moves money arrives here, so that order is the
+        // only order in which these two rows are ever taken.
+        lockForUpdate(from);
 
         // Overdrafts are not offered: a payment that would take the account below zero is
         // refused rather than allowed to run a negative balance.
@@ -248,6 +271,18 @@ public class PaymentService {
                 to == null ? null : to.getAccountId(),
                 amount, description, reason, detail);
         return new RuntimeException(reason);
+    }
+
+    /**
+     * Takes the payer's row for the rest of the transaction, so another payment from the same
+     * account waits rather than reading a balance that is about to change.
+     *
+     * The returned row is discarded: this is called for the lock, not the data. The account is
+     * already loaded, and re-reading it here would only invite the two copies to disagree.
+     */
+    private void lockForUpdate(Account account) {
+        accountRepository.findByIdForUpdate(account.getAccountId())
+                .orElseThrow(() -> new RuntimeException("Account no longer exists"));
     }
 
     private Account requireSettlementForUpdate(User institution) {

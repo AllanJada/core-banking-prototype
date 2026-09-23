@@ -39,6 +39,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import TransferTable from "../components/TransferTable";
 import Pager from "../components/Pager";
+import TakeDepositDialog from "../components/TakeDepositDialog";
 import { usePagedResource } from "../hooks/usePagedResource";
 import ProvisionCustomerDialog from "../components/ProvisionCustomerDialog";
 import SlipComposerDialog from "../components/SlipComposerDialog";
@@ -108,6 +109,8 @@ export default function DashboardPage() {
   const [reviewTransfer, setReviewTransfer] = useState<FileTransfer | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [unblockingId, setUnblockingId] = useState<number | null>(null);
+  // The customer a deposit is being taken for; null when the dialog is closed.
+  const [depositFor, setDepositFor] = useState<Customer | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
   // No userId argument anywhere: the backend scopes every one of these to whoever the token
@@ -286,12 +289,13 @@ export default function DashboardPage() {
                         <TableCell align="right">Balance</TableCell>
                         <TableCell>Card</TableCell>
                         <TableCell>Opened</TableCell>
+                        <TableCell align="right">At the counter</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {customers.items.length === 0 && !customers.loading && (
                         <TableRow>
-                          <TableCell colSpan={5}>
+                          <TableCell colSpan={6}>
                             <Typography variant="body2" color="text.secondary">
                               No customers yet. Provisioning one opens their account here.
                             </Typography>
@@ -331,6 +335,11 @@ export default function DashboardPage() {
                             )}
                           </TableCell>
                           <TableCell>{formatDate(customer.openedAt)}</TableCell>
+                          <TableCell align="right">
+                            <Button size="small" onClick={() => setDepositFor(customer)}>
+                              Deposit
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -498,6 +507,19 @@ export default function DashboardPage() {
           </Box>
         </Paper>
       </Container>
+
+      <TakeDepositDialog
+        open={depositFor !== null}
+        customer={depositFor}
+        onClose={() => setDepositFor(null)}
+        onCompleted={(message) => {
+          setSnackbar(message);
+          // Both: the customer's balance changed, and so did this institution's own cash
+          // position, which the overview reads.
+          customers.refresh();
+          loadSummary();
+        }}
+      />
 
       <ProvisionCustomerDialog
         open={customerDialogOpen}

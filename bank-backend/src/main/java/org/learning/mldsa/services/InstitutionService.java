@@ -2,12 +2,14 @@ package org.learning.mldsa.services;
 
 import lombok.RequiredArgsConstructor;
 import org.learning.mldsa.dtos.CustomerResponse;
+import org.learning.mldsa.dtos.DepositResponse;
 import org.learning.mldsa.dtos.InstitutionPaymentResponse;
 import org.learning.mldsa.dtos.InstitutionSummaryResponse;
 import org.learning.mldsa.dtos.ProvisionRequest;
 import org.learning.mldsa.models.Account;
 import org.learning.mldsa.models.AccountType;
 import org.learning.mldsa.models.DebitCard;
+import org.learning.mldsa.models.Deposit;
 import org.learning.mldsa.models.Role;
 import org.learning.mldsa.models.User;
 import org.learning.mldsa.repositories.AccountBalance;
@@ -48,6 +50,7 @@ public class InstitutionService {
     private final UserService userService;
     private final AccountService accountService;
     private final CardService cardService;
+    private final PaymentService paymentService;
     private final AccountRepository accountRepository;
     private final PostingRepository postingRepository;
     private final DebitCardRepository debitCardRepository;
@@ -181,6 +184,33 @@ public class InstitutionService {
         Account account = requireCustomerAccount(institutionId, customerId);
         DebitCard card = cardService.unblock(account);
         return toResponse(account, accountService.balanceOf(account.getAccountId()), card);
+    }
+
+    /**
+     * Takes a deposit for one of this institution's own customers — the counter operation.
+     *
+     * The account is resolved within the calling institution before any money moves, so a
+     * customer of another bank is not found rather than credited. This is the only way money
+     * enters the ledger, and it is two-sided: the institution's till funds it.
+     */
+    @Transactional
+    public DepositResponse depositForCustomer(Long institutionId, Long customerId,
+                                              BigDecimal amount, String description) {
+        Account account = requireCustomerAccount(institutionId, customerId);
+        User institution = userRepositories.findById(institutionId)
+                .filter(user -> user.getRole() == Role.INSTITUTION)
+                .orElseThrow(() -> new AccessDeniedException("Only an institution may take a deposit"));
+
+        Deposit deposit = paymentService.depositByInstitution(institution, account, amount, description);
+        return new DepositResponse(
+                deposit.getDepositId(),
+                account.getAccountNumber(),
+                deposit.getAmount(),
+                deposit.getDescription(),
+                deposit.getTransactionRef(),
+                deposit.getSignature(),
+                deposit.getDepositedAt(),
+                accountService.balanceOf(account.getAccountId()));
     }
 
     private Account requireCustomerAccount(Long institutionId, Long customerId) {

@@ -186,7 +186,7 @@ call POST /cards/me/verify-pin "$BEN" '{"pin":"1234"}'
 check "…and accepts the right PIN" 204
 
 echo "== Settlement accounts are not payable"
-call POST /payments/deposits "$ANN" '{"amount":100000,"description":"Opening deposit"}'
+call POST "/institution/customers/$ANN_ID/deposits" "$ALPHA" '{"amount":100000,"description":"Opening deposit"}'
 check "Ann deposits 100,000" 201
 call POST /payments "$ANN" "{\"toAccountNumber\":\"$ALPHA_SETTLEMENT\",\"amount\":1000,\"description\":\"Pay own bank's settlement\"}"
 check "§10 Customer pays their own bank's settlement account" 400 "No account exists with that number"
