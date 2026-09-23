@@ -642,10 +642,16 @@ tenancy and the provisioning chain, institution-signed statements with instituti
 account and card numbers, and inter-bank settlement with supervision. The plan's follow-up
 `pacs.008` interbank message is implemented too.
 
-Beyond that, what remains is deployment-stage work and the items named below as deliberately
-out of scope:
+**Since then**, three correctness gaps that could lose money were found and closed: a customer
+could be overdrawn by two payments racing each other (fixed by locking the payer's account for
+the moment the balance is checked), a retried request could execute twice (fixed with
+`Idempotency-Key` support), and deposits were single-sided credits a customer could create at
+will (fixed by moving deposits to a teller operation funded from the institution's own cash
+account, two-sided like every other movement).
 
-- A checksum-and-audit trail beyond the signature fields already present
+What remains beyond that is tracked in [`REMAINING-WORK.md`](REMAINING-WORK.md) rather than
+duplicated here — it is the maintained, itemised source, with each item's size and the order
+they are worth doing in.
 
 Deferred to the deployment stage:
 
@@ -657,55 +663,19 @@ been built along different lines than that research assumed  ISO 20022 `pain.001
 were, and at-rest encryption was done with AES-256-GCM rather than ML-KEM. What remains
 unbuilt from it is ML-KEM key encapsulation and zero-knowledge proofs. The Ed25519 swap
 moves deliberately away from a post-quantum posture, but that research stays valid if
-quantum resistance becomes a priority again.
+quantum resistance becomes a priority again  and the JDK in current use here ships both
+ML-DSA and ML-KEM natively, so returning to it would add no third-party crypto dependency.
+
+Zero-knowledge proofs specifically now have an actual build plan rather than being only a
+deferred idea: [`ZKP-NOIR-ROADMAP.md`](ZKP-NOIR-ROADMAP.md) covers the toolchain, the
+milestones, and the decisions that are expensive to reverse once a circuit or a commitment
+exists. Its first milestone  installing and proving the Noir toolchain end to end on this
+machine  is done; the rest is not started.
 
 Full detail on each of these is maintained separately in the project's research
 documents rather than duplicated here.
 
-## Running with Docker
-
-The whole system — Postgres, the backend with its headless Chromium, and the frontend
-behind nginx — comes up with one command. Nothing below needs Java, Maven, Node or
-Postgres installed locally.
-
-```
-cp .env.example .env     # then edit it; see the notes in the file
-docker compose up --build
-```
-
-Then open **http://localhost:5173**. The first build takes several minutes (Maven
-downloads, and the Playwright base image is large); subsequent builds reuse the cached
-dependency layers.
-
-| Service | Image | Published at |
-|---|---|---|
-| `frontend` | nginx serving the built Vite bundle | http://localhost:5173 |
-| `backend` | Spring Boot on JRE 26, on Playwright's Chromium image | http://localhost:8080 |
-| `db` | `postgres:17-alpine` | not published; reachable only inside the compose network |
-
-Notes on how it is wired:
-
-- **The API is same-origin.** The frontend bundle is built with an empty
-  `VITE_API_BASE_URL`, so it calls `/api/v1/...` and nginx proxies that to the backend.
-  The browser never makes a cross-origin request, so CORS is not involved at all.
-- **Startup is ordered.** The backend waits for Postgres to pass `pg_isready`, and the
-  frontend waits for the backend's healthcheck, so Flyway never races an initialising
-  database.
-- **Two volumes hold all the state**: `pgdata` for Postgres and `storage` for the signed
-  payslips and encrypted ISO 20022 payloads. They belong together — the database rows
-  point at those files. `docker compose down -v` destroys both and gives you the empty
-  system the demo walkthrough starts from.
-- **Secrets come from `.env`.** Compose refuses to start without `APP_JWT_SECRET` and
-  `APP_STORAGE_MASTER_KEY`, rather than silently falling back to the DEV ONLY values in
-  `application.properties`, which are public in this repository. Changing
-  `APP_STORAGE_MASTER_KEY` after files exist makes those files permanently unreadable.
-- **Chromium needs room.** The backend service sets `shm_size: 1gb`; Docker's default
-  64MB of shared memory is not enough for Chromium to render a PDF, and it crashes
-  mid-document instead of failing cleanly.
-
 ## Requirements
-
-Only needed when running outside Docker.
 
 - Java 26 (the version the build targets; see `java.version` in `bank-backend/pom.xml`)
 - Maven

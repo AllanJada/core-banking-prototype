@@ -8,12 +8,13 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Paper,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 import { blockCard, changeCardPin, getMyCard, issueCard } from "../api/client";
+import SectionCard from "./SectionCard";
+import { dataFontFamily } from "../theme";
 import type { DebitCard } from "../types";
 
 const STATUS_LABELS: Record<DebitCard["status"], string> = {
@@ -143,11 +144,10 @@ export default function CardPanel({ onNotify }: { onNotify: (message: string) =>
 
   return (
     <>
-      <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
-          Debit card
-        </Typography>
-
+      {/* Wrapped in the same surface every other panel uses, and with no page-flow margin
+          of its own: it now sits in a grid cell beside the balance rather than in a
+          single scrolling column. */}
+      <SectionCard title="Debit card">
         {card ? (
           <Stack spacing={1.5}>
             {issuedNumber && (
@@ -161,7 +161,10 @@ export default function CardPanel({ onNotify }: { onNotify: (message: string) =>
               spacing={2}
               sx={{ alignItems: { sm: "center" } }}
             >
-              <Typography variant="h6" sx={{ fontWeight: 600, letterSpacing: 1 }}>
+              <Typography
+                variant="h6"
+                sx={{ fontFamily: dataFontFamily, fontWeight: 500, letterSpacing: 1 }}
+              >
                 {card.cardNumber}
               </Typography>
               <Chip
@@ -195,7 +198,7 @@ export default function CardPanel({ onNotify }: { onNotify: (message: string) =>
             </Button>
           </Stack>
         )}
-      </Paper>
+      </SectionCard>
 
       <Dialog open={issueOpen} onClose={() => setIssueOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle>Issue a card</DialogTitle>

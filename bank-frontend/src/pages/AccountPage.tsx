@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
-  AppBar,
   Box,
   Button,
+  Card,
+  CardContent,
   Chip,
-  Container,
-  Paper,
+  Grid,
   Snackbar,
   Stack,
   Table,
@@ -16,13 +16,15 @@ import {
   TableHead,
   TableRow,
   TextField,
-  Toolbar,
   Typography,
 } from "@mui/material";
-import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import SendIcon from "@mui/icons-material/SendOutlined";
 import LinkIcon from "@mui/icons-material/LinkOutlined";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
+import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
+import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import LinkRoundedIcon from "@mui/icons-material/LinkRounded";
 import { useNavigate } from "react-router-dom";
 import {
   cancelPaymentLink,
@@ -38,7 +40,13 @@ import Pager from "../components/Pager";
 import { usePagedResource } from "../hooks/usePagedResource";
 import RequestPaymentDialog from "../components/RequestPaymentDialog";
 import CardPanel from "../components/CardPanel";
+import DashboardLayout from "../components/layout/DashboardLayout";
+import PageHeader from "../components/layout/PageHeader";
+import SectionCard from "../components/SectionCard";
+import { dataFontFamily } from "../theme";
 import type { Account, Payment, PaymentLink, Posting } from "../types";
+
+type Section = "overview" | "transactions" | "payments" | "requests";
 
 function formatMoney(amount: number, currency: string): string {
   return new Intl.NumberFormat(undefined, {
@@ -81,6 +89,27 @@ function formatDate(iso: string): string {
   });
 }
 
+const SECTION_COPY: Record<Section, { title: string; description: string }> = {
+  overview: {
+    title: "Overview",
+    description: "Your account, your card, and a statement for any period you choose.",
+  },
+  transactions: {
+    title: "Transaction history",
+    description:
+      "Every line the ledger holds for this account. The balance above is the sum of exactly these.",
+  },
+  payments: {
+    title: "Payments sent",
+    description:
+      "Including payments that were refused — those moved no money, so they appear here and not in the history.",
+  },
+  requests: {
+    title: "Payment requests",
+    description: "Links you have created asking someone else to pay you.",
+  },
+};
+
 /**
  * A customer's account view: the number, the balance, and the history it was derived from.
  *
@@ -89,12 +118,13 @@ function formatDate(iso: string): string {
  *
  * Two histories are shown rather than one: the transaction history is the ledger, and a
  * refused payment never reaches it, so payments are listed separately to make failures
- * and their reasons visible. Pay-by-link is not here yet.
+ * and their reasons visible.
  */
 export default function AccountPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const [section, setSection] = useState<Section>("overview");
   const [account, setAccount] = useState<Account | null>(null);
   // Each history is paged: postings and payments only ever accumulate for an account.
   const postings = usePagedResource<Posting>(getMyPostings);
@@ -162,112 +192,163 @@ export default function AccountPage() {
   }
 
   if (!user) return null;
+  const copy = SECTION_COPY[section];
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <AppBar position="static" elevation={0}>
-        <Toolbar sx={{ gap: 2 }}>
-          <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            Personal Banking
-          </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.85, display: { xs: "none", sm: "block" } }}>
-            Signed in as {user.username}
-          </Typography>
-          <Button color="inherit" size="small" startIcon={<LogoutIcon />} onClick={handleLogout}>
-            Sign out
-          </Button>
-        </Toolbar>
-      </AppBar>
-
-      <Container maxWidth="md" sx={{ py: 4 }}>
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
-          <Stack spacing={0.5}>
-            <Typography variant="body2" color="text.secondary">
-              Your bank
-            </Typography>
-            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-              {account ? `${account.institutionName} (${account.institutionCode})` : "—"}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ pt: 1.5 }}>
-              Account number
-            </Typography>
-            <Typography variant="h6" sx={{ fontWeight: 600, letterSpacing: 1 }}>
-              {account?.accountNumber ?? "—"}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ pt: 1.5 }}>
-              Available balance
-            </Typography>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>
-              {account ? formatMoney(account.balance, account.currency) : "—"}
-            </Typography>
-            {/* Wraps rather than overflowing: these do not fit one phone-width row.
-                There is deliberately no Deposit button — paying money in is done at the
-                counter by the bank, because an account holder who can credit their own
-                account can create money. */}
-            <Stack direction="row" sx={{ pt: 2, flexWrap: "wrap", gap: 1.5 }}>
-              <Button
-                variant="contained"
-                startIcon={<SendIcon />}
-                onClick={() => setPaymentDialogOpen(true)}
-              >
-                Send money
-              </Button>
-              <Button
-                variant="outlined"
-                startIcon={<LinkIcon />}
-                onClick={() => setRequestDialogOpen(true)}
-              >
-                Request payment
-              </Button>
-            </Stack>
-          </Stack>
-        </Paper>
-
-        <CardPanel onNotify={setSnackbar} />
-
-        <Paper variant="outlined" sx={{ p: 2.5, mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1.5 }}>
-            Download a statement
-          </Typography>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ alignItems: "flex-start" }}>
-            <TextField
-              label="From"
-              type="date"
-              size="small"
-              value={statementFrom}
-              onChange={(e) => setStatementFrom(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
-            <TextField
-              label="To"
-              type="date"
-              size="small"
-              value={statementTo}
-              onChange={(e) => setStatementTo(e.target.value)}
-              slotProps={{ inputLabel: { shrink: true } }}
-            />
+    <DashboardLayout<Section>
+      brand="Personal banking"
+      brandDetail={account?.institutionName}
+      username={user.username}
+      roleLabel="Customer"
+      onLogout={handleLogout}
+      section={section}
+      onSectionChange={setSection}
+      sections={[
+        { value: "overview", label: "Overview", icon: <DashboardRoundedIcon /> },
+        {
+          value: "transactions",
+          label: "Transactions",
+          icon: <ReceiptLongRoundedIcon />,
+          count: postings.totalElements,
+        },
+        {
+          value: "payments",
+          label: "Payments",
+          icon: <PaymentsRoundedIcon />,
+          count: payments.totalElements,
+        },
+        {
+          value: "requests",
+          label: "Requests",
+          icon: <LinkRoundedIcon />,
+          count: links.totalElements,
+        },
+      ]}
+    >
+      <PageHeader
+        context="Personal banking"
+        title={copy.title}
+        description={copy.description}
+        actions={
+          <>
+            {/* There is deliberately no Deposit button here — paying money in is done at
+                the counter by the bank, because an account holder who can credit their
+                own account can create money. */}
+            <Button
+              variant="contained"
+              startIcon={<SendIcon />}
+              onClick={() => setPaymentDialogOpen(true)}
+            >
+              Send money
+            </Button>
             <Button
               variant="outlined"
-              startIcon={<DownloadIcon />}
-              onClick={handleDownloadStatement}
-              disabled={downloadingStatement}
+              startIcon={<LinkIcon />}
+              onClick={() => setRequestDialogOpen(true)}
             >
-              {downloadingStatement ? "Preparing…" : "Download PDF"}
+              Request payment
             </Button>
-          </Stack>
-        </Paper>
+          </>
+        }
+      />
 
-        <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-          Transaction history
-        </Typography>
+      {error && <Alert severity="error">{error}</Alert>}
 
-        <Paper variant="outlined">
+      {section === "overview" && (
+        <Grid container spacing={2.5}>
+          <Grid size={{ xs: 12, md: 7 }}>
+            {/* The balance is the headline figure of this whole screen, so it gets the
+                one filled surface in the app rather than another outlined card. */}
+            <Card
+              variant="outlined"
+              sx={{
+                height: "100%",
+                color: "primary.contrastText",
+                borderColor: "transparent",
+                backgroundImage: (theme) =>
+                  `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+              }}
+            >
+              <CardContent>
+                <Stack spacing={0.5}>
+                  <Typography variant="caption" sx={{ opacity: 0.75 }}>
+                    Your bank
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    {account ? `${account.institutionName} (${account.institutionCode})` : "—"}
+                  </Typography>
+
+                  <Typography variant="caption" sx={{ opacity: 0.75, pt: 1.5 }}>
+                    Account number
+                  </Typography>
+                  <Typography
+                    variant="h6"
+                    sx={{ fontFamily: dataFontFamily, letterSpacing: 1, fontWeight: 500 }}
+                  >
+                    {account?.accountNumber ?? "—"}
+                  </Typography>
+
+                  <Typography variant="caption" sx={{ opacity: 0.75, pt: 1.5 }}>
+                    Available balance
+                  </Typography>
+                  <Typography variant="h3" sx={{ fontWeight: 600 }}>
+                    {account ? formatMoney(account.balance, account.currency) : "—"}
+                  </Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.75, pt: 0.5 }}>
+                    Summed from this account's postings every time this page loads — never a
+                    stored figure.
+                  </Typography>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid size={{ xs: 12, md: 5 }}>
+            <CardPanel onNotify={setSnackbar} />
+          </Grid>
+
+          <Grid size={{ xs: 12 }}>
+            <SectionCard
+              title="Download a statement"
+              description="A signed PDF for any period, verifiable against your bank's public key."
+            >
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1.5}
+                sx={{ alignItems: "flex-start" }}
+              >
+                <TextField
+                  label="From"
+                  type="date"
+                  size="small"
+                  value={statementFrom}
+                  onChange={(e) => setStatementFrom(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                />
+                <TextField
+                  label="To"
+                  type="date"
+                  size="small"
+                  value={statementTo}
+                  onChange={(e) => setStatementTo(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }}
+                />
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={handleDownloadStatement}
+                  disabled={downloadingStatement}
+                >
+                  {downloadingStatement ? "Preparing…" : "Download PDF"}
+                </Button>
+              </Stack>
+            </SectionCard>
+          </Grid>
+        </Grid>
+      )}
+
+      {section === "transactions" && (
+        <SectionCard disablePadding>
           <TableContainer>
             <Table size="small" sx={{ minWidth: 640 }}>
               <TableHead>
@@ -281,7 +362,7 @@ export default function AccountPage() {
                 {postings.items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={3}>
-                      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
                         No transactions yet.
                       </Typography>
                     </TableCell>
@@ -291,13 +372,15 @@ export default function AccountPage() {
                     const isCredit = posting.direction === "CREDIT";
                     return (
                       <TableRow key={posting.postingId}>
-                        <TableCell>{formatDate(posting.postedAt)}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>
+                          {formatDate(posting.postedAt)}
+                        </TableCell>
                         <TableCell>{posting.description ?? "—"}</TableCell>
                         <TableCell
                           align="right"
                           sx={{
                             fontWeight: 600,
-                            color: isCredit ? "success.main" : "text.primary",
+                            color: isCredit ? "success.dark" : "text.primary",
                             whiteSpace: "nowrap",
                           }}
                         >
@@ -312,15 +395,11 @@ export default function AccountPage() {
             </Table>
           </TableContainer>
           <Pager {...postings} onPageChange={postings.setPage} />
-        </Paper>
+        </SectionCard>
+      )}
 
-        {/* Kept separate from the history above because a refused payment moved no money
-            and so has no posting — this is the only place it is visible. */}
-        <Typography variant="h6" sx={{ fontWeight: 600, mt: 4, mb: 2 }}>
-          Payments sent
-        </Typography>
-
-        <Paper variant="outlined">
+      {section === "payments" && (
+        <SectionCard disablePadding>
           <TableContainer>
             <Table size="small" sx={{ minWidth: 640 }}>
               <TableHead>
@@ -335,7 +414,7 @@ export default function AccountPage() {
                 {payments.items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4}>
-                      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
                         No payments sent yet.
                       </Typography>
                     </TableCell>
@@ -343,38 +422,31 @@ export default function AccountPage() {
                 ) : (
                   payments.items.map((payment) => (
                     <TableRow key={payment.paymentId}>
-                      <TableCell>{formatDate(payment.createdAt)}</TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {formatDate(payment.createdAt)}
+                      </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                          <span>{payment.toAccountNumber ?? "—"}</span>
+                          <Box component="span" sx={{ fontFamily: dataFontFamily }}>
+                            {payment.toAccountNumber ?? "—"}
+                          </Box>
                           {/* Named only when the money left this customer's own bank, which
                               is the case that settles between institutions. */}
                           {payment.toInstitutionCode &&
                             account &&
                             payment.toInstitutionCode !== account.institutionCode && (
-                              <Chip
-                                size="small"
-                                variant="outlined"
-                                label={payment.toInstitutionCode}
-                              />
+                              <Chip size="small" color="info" label={payment.toInstitutionCode} />
                             )}
                         </Stack>
                       </TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                        {account
-                          ? formatMoney(payment.amount, account.currency)
-                          : payment.amount}
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                        {account ? formatMoney(payment.amount, account.currency) : payment.amount}
                       </TableCell>
                       <TableCell>
                         {payment.status === "COMPLETED" ? (
                           <Chip size="small" color="success" label="Completed" />
                         ) : (
-                          <Chip
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                            label={payment.failureReason ?? "Failed"}
-                          />
+                          <Chip size="small" color="error" label={payment.failureReason ?? "Failed"} />
                         )}
                       </TableCell>
                     </TableRow>
@@ -384,14 +456,13 @@ export default function AccountPage() {
             </Table>
           </TableContainer>
           <Pager {...payments} onPageChange={payments.setPage} />
-        </Paper>
-        <Typography variant="h6" sx={{ fontWeight: 600, mt: 4, mb: 2 }}>
-          Payment requests
-        </Typography>
+        </SectionCard>
+      )}
 
-        <Paper variant="outlined">
+      {section === "requests" && (
+        <SectionCard disablePadding>
           <TableContainer>
-            <Table size="small" sx={{ minWidth: 640 }}>
+            <Table size="small" sx={{ minWidth: 680 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Created</TableCell>
@@ -405,7 +476,7 @@ export default function AccountPage() {
                 {links.items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5}>
-                      <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
                         No payment requests yet.
                       </Typography>
                     </TableCell>
@@ -413,17 +484,24 @@ export default function AccountPage() {
                 ) : (
                   links.items.map((link) => (
                     <TableRow key={link.linkId}>
-                      <TableCell>{formatDate(link.createdAt)}</TableCell>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>
+                        {formatDate(link.createdAt)}
+                      </TableCell>
                       <TableCell>{link.description || "—"}</TableCell>
-                      <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                      <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 500 }}>
                         {account ? formatMoney(link.amount, account.currency) : link.amount}
                       </TableCell>
                       <TableCell>
                         <Chip
                           size="small"
                           label={LINK_STATUS_LABELS[link.status]}
-                          color={link.status === "PAID" ? "success" : "default"}
-                          variant={link.status === "PENDING" ? "filled" : "outlined"}
+                          color={
+                            link.status === "PAID"
+                              ? "success"
+                              : link.status === "PENDING"
+                                ? "warning"
+                                : "default"
+                          }
                         />
                       </TableCell>
                       <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
@@ -445,8 +523,8 @@ export default function AccountPage() {
             </Table>
           </TableContainer>
           <Pager {...links} onPageChange={links.setPage} />
-        </Paper>
-      </Container>
+        </SectionCard>
+      )}
 
       <SendMoneyDialog
         open={paymentDialogOpen}
@@ -469,6 +547,6 @@ export default function AccountPage() {
         onClose={() => setSnackbar(null)}
         message={snackbar}
       />
-    </Box>
+    </DashboardLayout>
   );
 }

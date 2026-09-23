@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  AppBar,
   Box,
   Button,
   Chip,
-  Container,
-  Paper,
+  Grid,
   Snackbar,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Tabs,
-  Toolbar,
   Typography,
 } from "@mui/material";
 import DescriptionIcon from "@mui/icons-material/DescriptionOutlined";
 import DownloadIcon from "@mui/icons-material/DownloadOutlined";
-import LogoutIcon from "@mui/icons-material/LogoutOutlined";
 import PersonAddIcon from "@mui/icons-material/PersonAddOutlined";
+import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
+import PeopleRoundedIcon from "@mui/icons-material/PeopleRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import ForumRoundedIcon from "@mui/icons-material/ForumRounded";
+import InboxRoundedIcon from "@mui/icons-material/InboxRounded";
+import OutboxRoundedIcon from "@mui/icons-material/OutboxRounded";
 import { useNavigate } from "react-router-dom";
 import {
   downloadFile,
@@ -44,6 +44,11 @@ import { usePagedResource } from "../hooks/usePagedResource";
 import ProvisionCustomerDialog from "../components/ProvisionCustomerDialog";
 import SlipComposerDialog from "../components/SlipComposerDialog";
 import TransferReviewDialog from "../components/TransferReviewDialog";
+import DashboardLayout from "../components/layout/DashboardLayout";
+import PageHeader from "../components/layout/PageHeader";
+import StatCard from "../components/StatCard";
+import SectionCard from "../components/SectionCard";
+import { dataFontFamily } from "../theme";
 import type {
   Customer,
   FileTransfer,
@@ -70,24 +75,35 @@ function formatDate(iso: string): string {
   });
 }
 
-/** One figure on the overview. */
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Paper variant="outlined" sx={{ p: 2.5, flex: 1, minWidth: 190 }}>
-      <Typography variant="body2" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="h5" sx={{ fontWeight: 700, mt: 0.5 }}>
-        {value}
-      </Typography>
-      {hint && (
-        <Typography variant="caption" color="text.secondary">
-          {hint}
-        </Typography>
-      )}
-    </Paper>
-  );
-}
+/** Titles and the standing explanation for each section, shown in the page header. */
+const SECTION_COPY: Record<Section, { title: string; description: string }> = {
+  overview: {
+    title: "Overview",
+    description: "This institution's own customers, funds and standing at the Central Bank.",
+  },
+  customers: {
+    title: "Customers",
+    description: "Accounts opened at this institution, and the counter operations available on them.",
+  },
+  payments: {
+    title: "Payments",
+    description:
+      "Payments made by this institution's customers, including refusals and the cause behind them.",
+  },
+  messages: {
+    title: "Interbank messages",
+    description:
+      "The ISO 20022 messages this institution is party to. Each is re-hashed and signature-checked before it is served.",
+  },
+  inbox: {
+    title: "Inbox",
+    description: "Signed documents sent to this institution, awaiting review or already decided.",
+  },
+  outbox: {
+    title: "Outbox",
+    description: "Signed documents this institution has sent to other institutions.",
+  },
+};
 
 /**
  * An institution's console: its own customers and their payments, its position at the Central
@@ -102,7 +118,7 @@ export default function DashboardPage() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [tab, setTab] = useState<Section>("overview");
+  const [section, setSection] = useState<Section>("overview");
   const [summary, setSummary] = useState<InstitutionSummary | null>(null);
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [slipDialogOpen, setSlipDialogOpen] = useState(false);
@@ -192,321 +208,336 @@ export default function DashboardPage() {
     navigate("/login", { replace: true });
   }
 
+  const currency = summary?.currency ?? "TZS";
+  const copy = SECTION_COPY[section];
+
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
-      <AppBar position="static" elevation={0}>
-        <Toolbar sx={{ gap: 2 }}>
-          <Typography variant="subtitle1" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            Institution{summary ? ` · ${summary.institutionCode}` : ""}
-          </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.85, display: { xs: "none", sm: "block" } }}>
-            Signed in as {user.username}
-          </Typography>
-          <Button
-            color="inherit"
-            size="small"
-            startIcon={<LogoutIcon />}
-            onClick={handleLogout}
-          >
-            Sign out
-          </Button>
-        </Toolbar>
-      </AppBar>
+    <DashboardLayout<Section>
+      brand="Institution"
+      brandDetail={summary?.institutionCode}
+      username={user.username}
+      roleLabel="Institution"
+      onLogout={handleLogout}
+      section={section}
+      onSectionChange={setSection}
+      sections={[
+        { value: "overview", label: "Overview", icon: <DashboardRoundedIcon /> },
+        {
+          value: "customers",
+          label: "Customers",
+          icon: <PeopleRoundedIcon />,
+          count: customers.totalElements,
+        },
+        {
+          value: "payments",
+          label: "Payments",
+          icon: <PaymentsRoundedIcon />,
+          count: payments.totalElements,
+        },
+        {
+          value: "messages",
+          label: "Messages",
+          icon: <ForumRoundedIcon />,
+          count: messages.totalElements,
+        },
+        { value: "inbox", label: "Inbox", icon: <InboxRoundedIcon />, count: inbox.totalElements },
+        {
+          value: "outbox",
+          label: "Outbox",
+          icon: <OutboxRoundedIcon />,
+          count: outbox.totalElements,
+        },
+      ]}
+    >
+      <PageHeader
+        context="Institution"
+        title={copy.title}
+        description={copy.description}
+        actions={
+          <>
+            <Button
+              variant="outlined"
+              startIcon={<PersonAddIcon />}
+              onClick={() => setCustomerDialogOpen(true)}
+            >
+              Provision customer
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<DescriptionIcon />}
+              onClick={() => setSlipDialogOpen(true)}
+            >
+              Compose slip
+            </Button>
+          </>
+        }
+      />
 
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 1, mb: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<PersonAddIcon />}
-            onClick={() => setCustomerDialogOpen(true)}
-          >
-            Provision customer
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<DescriptionIcon />}
-            onClick={() => setSlipDialogOpen(true)}
-          >
-            Compose slip
-          </Button>
+      {section === "overview" && summary && (
+        <Stack spacing={2}>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+              <StatCard label="Customers" value={String(summary.customerCount)} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+              <StatCard
+                label="Customer funds held"
+                value={money(summary.customerFundsHeld, summary.currency)}
+                hint="summed from the ledger"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+              <StatCard
+                label="Settlement position"
+                value={money(summary.settlementPosition, summary.currency)}
+                hint={`account ${summary.settlementAccountNumber}`}
+                tone={summary.settlementPosition < 0 ? "error" : "default"}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+              <StatCard
+                label="Headroom"
+                value={money(summary.headroom, summary.currency)}
+                hint={`net debit cap ${money(summary.netDebitCap, summary.currency)}`}
+              />
+            </Grid>
+          </Grid>
+
+          <SectionCard title="What these figures mean">
+            <Typography variant="body2" color="text.secondary">
+              A negative settlement position means this bank currently owes the rest of the system.
+              When the headroom runs out, its customers' payments to other banks are refused — and
+              they are told only that the payment could not be settled, so the reason to act on is
+              here.
+            </Typography>
+          </SectionCard>
         </Stack>
+      )}
 
-        <Paper variant="outlined">
-          <Tabs
-            value={tab}
-            onChange={(_, value) => setTab(value)}
-            variant="scrollable"
-            scrollButtons="auto"
-            allowScrollButtonsMobile
-            sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}
-          >
-            <Tab label="Overview" value="overview" />
-            <Tab label={`Customers (${customers.totalElements})`} value="customers" />
-            <Tab label={`Payments (${payments.totalElements})`} value="payments" />
-            <Tab label={`Messages (${messages.totalElements})`} value="messages" />
-            <Tab label={`Inbox (${inbox.totalElements})`} value="inbox" />
-            <Tab label={`Outbox (${outbox.totalElements})`} value="outbox" />
-          </Tabs>
-
-          <Box sx={{ p: 2 }}>
-            {tab === "overview" && summary && (
-              <Stack spacing={2}>
-                <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap", gap: 2 }}>
-                  <Stat label="Customers" value={String(summary.customerCount)} />
-                  <Stat
-                    label="Customer funds held"
-                    value={money(summary.customerFundsHeld, summary.currency)}
-                    hint="summed from the ledger"
-                  />
-                  <Stat
-                    label="Settlement position"
-                    value={money(summary.settlementPosition, summary.currency)}
-                    hint={`account ${summary.settlementAccountNumber}`}
-                  />
-                  <Stat
-                    label="Headroom"
-                    value={money(summary.headroom, summary.currency)}
-                    hint={`net debit cap ${money(summary.netDebitCap, summary.currency)}`}
-                  />
-                </Stack>
-                <Typography variant="body2" color="text.secondary">
-                  A negative settlement position means this bank currently owes the rest of the
-                  system. When the headroom runs out, its customers' payments to other banks are
-                  refused — and they are told only that the payment could not be settled, so the
-                  reason to act on is here.
-                </Typography>
-              </Stack>
-            )}
-
-            {tab === "customers" && (
-              <>
-                <TableContainer>
-                  <Table size="small" sx={{ minWidth: 640 }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Customer</TableCell>
-                        <TableCell>Account number</TableCell>
-                        <TableCell align="right">Balance</TableCell>
-                        <TableCell>Card</TableCell>
-                        <TableCell>Opened</TableCell>
-                        <TableCell align="right">At the counter</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {customers.items.length === 0 && !customers.loading && (
-                        <TableRow>
-                          <TableCell colSpan={6}>
-                            <Typography variant="body2" color="text.secondary">
-                              No customers yet. Provisioning one opens their account here.
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {customers.items.map((customer) => (
-                        <TableRow key={customer.userId}>
-                          <TableCell>{customer.username}</TableCell>
-                          <TableCell sx={{ letterSpacing: 0.5 }}>{customer.accountNumber}</TableCell>
-                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                            {money(customer.balance, customer.currency)}
-                          </TableCell>
-                          <TableCell>
-                            {customer.cardStatus ? (
-                              <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                                <Chip
-                                  size="small"
-                                  label={`${customer.cardNumber} · ${customer.cardStatus}`}
-                                  color={customer.cardStatus === "ACTIVE" ? "success" : "default"}
-                                  variant="outlined"
-                                />
-                                {customer.cardStatus === "BLOCKED" && (
-                                  <Button
-                                    size="small"
-                                    onClick={() => handleUnblock(customer)}
-                                    disabled={unblockingId === customer.userId}
-                                  >
-                                    {unblockingId === customer.userId ? "Unblocking…" : "Unblock"}
-                                  </Button>
-                                )}
-                              </Stack>
-                            ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                none
-                              </Typography>
-                            )}
-                          </TableCell>
-                          <TableCell>{formatDate(customer.openedAt)}</TableCell>
-                          <TableCell align="right">
-                            <Button size="small" onClick={() => setDepositFor(customer)}>
-                              Deposit
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                <Pager {...customers} onPageChange={customers.setPage} />
-              </>
-            )}
-
-            {tab === "payments" && (
-              <>
-                <TableContainer>
-                  <Table size="small" sx={{ minWidth: 720 }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Customer</TableCell>
-                        <TableCell>To</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                        <TableCell>Outcome</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {payments.items.length === 0 && !payments.loading && (
-                        <TableRow>
-                          <TableCell colSpan={5}>
-                            <Typography variant="body2" color="text.secondary">
-                              No payments by this institution's customers yet.
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {payments.items.map((payment) => (
-                        <TableRow key={payment.paymentId}>
-                          <TableCell>{formatDate(payment.createdAt)}</TableCell>
-                          <TableCell>{payment.customerUsername}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                              <span>{payment.toAccountNumber ?? "—"}</span>
-                              {/* Flagged when the money had to settle between banks. */}
-                              {payment.interBank && payment.toInstitutionCode && (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  color="info"
-                                  label={payment.toInstitutionCode}
-                                />
-                              )}
-                            </Stack>
-                          </TableCell>
-                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                            {money(payment.amount, summary?.currency ?? "TZS")}
-                          </TableCell>
-                          <TableCell>
-                            {payment.status === "COMPLETED" ? (
-                              <Chip size="small" color="success" label="Completed" />
-                            ) : (
-                              <Stack spacing={0.5}>
-                                <Chip
-                                  size="small"
-                                  color="error"
-                                  variant="outlined"
-                                  label={payment.failureReason ?? "Failed"}
-                                />
-                                {/* What the customer was not told, and this bank needs. */}
-                                {payment.failureDetail && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    {payment.failureDetail}
-                                  </Typography>
-                                )}
-                              </Stack>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                <Pager {...payments} onPageChange={payments.setPage} />
-              </>
-            )}
-
-            {tab === "messages" && (
-              <>
-                <TableContainer>
-                  <Table size="small" sx={{ minWidth: 720 }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Direction</TableCell>
-                        <TableCell>Counterparty bank</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                        <TableCell>Message</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {messages.items.length === 0 && !messages.loading && (
-                        <TableRow>
-                          <TableCell colSpan={5}>
-                            <Typography variant="body2" color="text.secondary">
-                              No interbank messages yet. One is written for every payment that
-                              crosses banks; payments within this bank need none.
-                            </Typography>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {messages.items.map((message) => (
-                        <TableRow key={message.messageId}>
-                          <TableCell>{formatDate(message.createdAt)}</TableCell>
-                          <TableCell>
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              color={message.direction === "SENT" ? "warning" : "info"}
-                              label={message.direction === "SENT" ? "Sent" : "Received"}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {message.direction === "SENT"
-                              ? message.creditorAgentCode
-                              : message.debtorAgentCode}
-                          </TableCell>
-                          <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-                            {money(message.amount, message.currency)}
-                          </TableCell>
-                          <TableCell>
-                            {/* Re-hashed and signature-checked server-side before it is served. */}
+      {section === "customers" && (
+        <SectionCard disablePadding>
+          <TableContainer>
+            <Table size="small" sx={{ minWidth: 720 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>Account number</TableCell>
+                  <TableCell align="right">Balance</TableCell>
+                  <TableCell>Card</TableCell>
+                  <TableCell>Opened</TableCell>
+                  <TableCell align="right">At the counter</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {customers.items.length === 0 && !customers.loading && (
+                  <TableRow>
+                    <TableCell colSpan={6}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
+                        No customers yet. Provisioning one opens their account here.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {customers.items.map((customer) => (
+                  <TableRow key={customer.userId}>
+                    <TableCell sx={{ fontWeight: 500 }}>{customer.username}</TableCell>
+                    <TableCell sx={{ fontFamily: dataFontFamily, letterSpacing: 0.3 }}>
+                      {customer.accountNumber}
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {money(customer.balance, customer.currency)}
+                    </TableCell>
+                    <TableCell>
+                      {customer.cardStatus ? (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                          <Chip
+                            size="small"
+                            label={`${customer.cardNumber} · ${customer.cardStatus}`}
+                            color={customer.cardStatus === "ACTIVE" ? "success" : "default"}
+                          />
+                          {customer.cardStatus === "BLOCKED" && (
                             <Button
                               size="small"
-                              startIcon={<DownloadIcon />}
-                              onClick={() => handleDownloadMessage(message)}
+                              onClick={() => handleUnblock(customer)}
+                              disabled={unblockingId === customer.userId}
                             >
-                              {message.messageType}
+                              {unblockingId === customer.userId ? "Unblocking…" : "Unblock"}
                             </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-                <Pager {...messages} onPageChange={messages.setPage} />
-              </>
-            )}
+                          )}
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          none
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {formatDate(customer.openedAt)}
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button size="small" variant="outlined" onClick={() => setDepositFor(customer)}>
+                        Deposit
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Pager {...customers} onPageChange={customers.setPage} />
+        </SectionCard>
+      )}
 
-            {tab === "inbox" && (
-              <>
-                <TransferTable
-                  mode="inbox"
-                  transfers={inbox.items}
-                  onDownload={handleDownload}
-                  onDownloadPayload={handleDownloadPayload}
-                  onReview={setReviewTransfer}
-                  downloadingId={downloadingId}
-                />
-                <Pager {...inbox} onPageChange={inbox.setPage} />
-              </>
-            )}
+      {section === "payments" && (
+        <SectionCard disablePadding>
+          <TableContainer>
+            <Table size="small" sx={{ minWidth: 760 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>To</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Outcome</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {payments.items.length === 0 && !payments.loading && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
+                        No payments by this institution's customers yet.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {payments.items.map((payment) => (
+                  <TableRow key={payment.paymentId}>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {formatDate(payment.createdAt)}
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>{payment.customerUsername}</TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                        <Box component="span" sx={{ fontFamily: dataFontFamily }}>
+                          {payment.toAccountNumber ?? "—"}
+                        </Box>
+                        {/* Flagged when the money had to settle between banks. */}
+                        {payment.interBank && payment.toInstitutionCode && (
+                          <Chip size="small" color="info" label={payment.toInstitutionCode} />
+                        )}
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {money(payment.amount, currency)}
+                    </TableCell>
+                    <TableCell>
+                      {payment.status === "COMPLETED" ? (
+                        <Chip size="small" color="success" label="Completed" />
+                      ) : (
+                        <Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+                          <Chip size="small" color="error" label={payment.failureReason ?? "Failed"} />
+                          {/* What the customer was not told, and this bank needs. */}
+                          {payment.failureDetail && (
+                            <Typography variant="caption" color="text.secondary">
+                              {payment.failureDetail}
+                            </Typography>
+                          )}
+                        </Stack>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Pager {...payments} onPageChange={payments.setPage} />
+        </SectionCard>
+      )}
 
-            {tab === "outbox" && (
-              <>
-                <TransferTable mode="outbox" transfers={outbox.items} />
-                <Pager {...outbox} onPageChange={outbox.setPage} />
-              </>
-            )}
-          </Box>
-        </Paper>
-      </Container>
+      {section === "messages" && (
+        <SectionCard disablePadding>
+          <TableContainer>
+            <Table size="small" sx={{ minWidth: 760 }}>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Direction</TableCell>
+                  <TableCell>Counterparty bank</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                  <TableCell>Message</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {messages.items.length === 0 && !messages.loading && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
+                        No interbank messages yet. One is written for every payment that crosses
+                        banks; payments within this bank need none.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {messages.items.map((message) => (
+                  <TableRow key={message.messageId}>
+                    <TableCell sx={{ whiteSpace: "nowrap" }}>
+                      {formatDate(message.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        color={message.direction === "SENT" ? "warning" : "info"}
+                        label={message.direction === "SENT" ? "Sent" : "Received"}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>
+                      {message.direction === "SENT"
+                        ? message.creditorAgentCode
+                        : message.debtorAgentCode}
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: "nowrap", fontWeight: 500 }}>
+                      {money(message.amount, message.currency)}
+                    </TableCell>
+                    <TableCell>
+                      {/* Re-hashed and signature-checked server-side before it is served. */}
+                      <Button
+                        size="small"
+                        startIcon={<DownloadIcon />}
+                        onClick={() => handleDownloadMessage(message)}
+                      >
+                        {message.messageType}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          <Pager {...messages} onPageChange={messages.setPage} />
+        </SectionCard>
+      )}
+
+      {section === "inbox" && (
+        <SectionCard disablePadding>
+          <TransferTable
+            mode="inbox"
+            transfers={inbox.items}
+            onDownload={handleDownload}
+            onDownloadPayload={handleDownloadPayload}
+            onReview={setReviewTransfer}
+            downloadingId={downloadingId}
+          />
+          <Pager {...inbox} onPageChange={inbox.setPage} />
+        </SectionCard>
+      )}
+
+      {section === "outbox" && (
+        <SectionCard disablePadding>
+          <TransferTable mode="outbox" transfers={outbox.items} />
+          <Pager {...outbox} onPageChange={outbox.setPage} />
+        </SectionCard>
+      )}
 
       <TakeDepositDialog
         open={depositFor !== null}
@@ -556,6 +587,6 @@ export default function DashboardPage() {
         onClose={() => setSnackbar(null)}
         message={snackbar}
       />
-    </Box>
+    </DashboardLayout>
   );
 }
