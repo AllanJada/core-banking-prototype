@@ -18,14 +18,15 @@ public class User {
     @Column(name = "password")
     private String password;
 
-    // Ed25519 keys are small: 44 bytes encoded for the public key and 48 for the private,
-    // which is ~60 and ~64 characters once Base64-encoded. Both fit the default
-    // varchar(255) comfortably, so the TEXT override these needed under ML-DSA-65
-    // (~2.6KB and ~5.4KB respectively) is no longer warranted.
-    @Column(name = "public_key")
+    // ML-DSA-65 keys do not fit the default varchar(255): Base64-encoded, a public key is
+    // 2,632 characters. Hence the TEXT override, matching V8__mldsa_key_and_signature_widths.
+    @Column(name = "public_key", columnDefinition = "text")
     private String publicKey;
 
-    @Column(name = "private_key")
+    // Smaller than the public key, and smaller than Ed25519's was: the JDK encodes an
+    // ML-DSA private key as its 32-byte seed, 72 characters once Base64-encoded. TEXT
+    // anyway, so none of these columns needs revisiting if that encoding ever changes.
+    @Column(name = "private_key", columnDefinition = "text")
     private String privateKey;
 
     // What this account is allowed to do, not just which dashboard it sees — this value

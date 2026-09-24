@@ -35,7 +35,7 @@ Companion documents sit beside this one:
 - Spring Web (REST API)
 - Spring Data JPA
 - Spring Security (password hashing and CORS configuration)
-- Ed25519 digital signatures (native JDK, JEP 339  no external crypto provider)
+- ML-DSA-65 post-quantum digital signatures (native JDK, JEP 497  no external crypto provider)
 - Thymeleaf (HTML templating for generated documents)
 - Microsoft Playwright for Java (headless Chromium PDF rendering)
 - PostgreSQL
@@ -109,7 +109,7 @@ src
   banking page
 - Accounts are provisioned along a chain of custody (see Two-Tier Provisioning); passwords
   are hashed with bcrypt
-- Every account is provisioned with its own Ed25519 key pair at creation time
+- Every account is provisioned with its own ML-DSA-65 key pair at creation time
 
 ### Accounts and Ledger
 
@@ -310,12 +310,13 @@ allows directly.
 
 ### Cryptographic Signing
 
-- Every file transfer is signed with Ed25519 at the moment it is sent, using the
-  sending account's own private key. This replaced ML-DSA-65 (post-quantum, FIPS 204)
-  when the project pivoted toward core banking: Ed25519 is built into the JDK, needs no
-  third-party provider, and has keys and signatures measured in tens of bytes rather
-  than kilobytes. The tradeoff is deliberate  it gives up resistance to a future
-  quantum attacker, and the post-quantum research remains on file if that changes
+- Every file transfer is signed with ML-DSA-65 at the moment it is sent, using the
+  sending account's own private key. ML-DSA (FIPS 204, the standardised form of
+  CRYSTALS-Dilithium) is lattice-based and so is not broken by Shor's algorithm, unlike
+  the Ed25519 scheme it replaced: an elliptic-curve public key *is* the hard problem a
+  quantum computer solves. It is native to the JDK from Java 24 (JEP 497), so there is
+  still no third-party provider. The cost is size  keys and signatures run to kilobytes
+  rather than tens of bytes, which is why those columns are TEXT
 - The file's SHA-384 hash, sender, receiver, filename, and timestamp are bound
   together into a signed envelope, not just the file content alone
 - The system independently rehashes the file as it currently exists on disk and
@@ -480,7 +481,7 @@ filesystem access can read file contents" gap recorded under the security notes.
   two across disk and database would create a pairing that restoring one without the other
   could break
 - **GCM is authenticated encryption**: altering stored bytes makes decryption fail rather
-  than yield plausible rubbish. This is a separate guarantee from the Ed25519 signature over
+  than yield plausible rubbish. This is a separate guarantee from the ML-DSA-65 signature over
   the plaintext, and both are kept  the signature proves who produced a document, GCM
   proves the stored bytes were not altered underneath it
 - **Encryption is confined to the storage layer.** Hashes and signatures are computed over
@@ -615,7 +616,7 @@ managed key store.
 
 ## Key Custody (Current Stage)
 
-Every account's Ed25519 private key is generated at account creation and stored
+Every account's ML-DSA-65 private key is generated at account creation and stored
 directly in the database alongside its public key. This means the server holds both
 halves of every account's key pair. Signing proves a file was not altered after this
 server processed it, but it does not yet provide genuine non-repudiation between two
@@ -627,7 +628,8 @@ limitation, not an oversight, and is the primary item at the top of the roadmap 
 
 The project was reshaped from a file-transfer system into a core banking system, one
 module at a time. Identity and access (roles, centralized login, RBAC), the
-crypto swap to Ed25519, the accounts/ledger foundation, deposits/payments, pay-by-link,
+the crypto swaps (to Ed25519, then back to post-quantum ML-DSA-65), the accounts/ledger
+foundation, deposits/payments, pay-by-link,
 signed account statements, debit cards, ISO 20022 `pain.001` payloads, at-rest file
 encryption, the bank role's admin console, pagination, the responsive audit, and
 inter-institutional transfer review are done.
@@ -661,9 +663,11 @@ Deferred to the deployment stage:
 An earlier post-quantum track was researched before this pivot. Two of its items have since
 been built along different lines than that research assumed  ISO 20022 `pain.001` payloads
 were, and at-rest encryption was done with AES-256-GCM rather than ML-KEM. What remains
-unbuilt from it is ML-KEM key encapsulation and zero-knowledge proofs. The Ed25519 swap
-moves deliberately away from a post-quantum posture, but that research stays valid if
-quantum resistance becomes a priority again  and the JDK in current use here ships both
+unbuilt from it is ML-KEM key encapsulation and zero-knowledge proofs. Signing has since
+returned to a post-quantum posture: ML-DSA-65 replaced Ed25519, so that half of the
+research is now built rather than filed. ML-KEM remains unbuilt, and deliberately so —
+this system has no key exchange for it to live in: there is no RSA or ECDH anywhere, and
+the AES master key is symmetric configuration. The JDK in current use here ships both
 ML-DSA and ML-KEM natively, so returning to it would add no third-party crypto dependency.
 
 Zero-knowledge proofs specifically now have an actual build plan rather than being only a

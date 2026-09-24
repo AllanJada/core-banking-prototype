@@ -133,7 +133,7 @@ already caused a real bug (§9.2).
 ```
 User (identity.users)
   ├─ role: Role (NORMAL_USER | INSTITUTION | BANK)
-  ├─ publicKey, privateKey: Ed25519, Base64 — both halves held server-side (§7.4)
+  ├─ publicKey, privateKey: ML-DSA-65, Base64 — both halves held server-side (§7.4)
   ├─ bic: optional ISO 9362 BIC (null for every account in this deployment)
   ├─ institutionCode: 3–8 letters/digits, unique   [INSTITUTION only]
   ├─ institutionNumber: 3 digits, unique — prefixes the account and card
@@ -453,17 +453,24 @@ tenant-scoped (§5.4).
 
 ### 7.1 Signing algorithm
 
-**Ed25519**, native to the JDK since Java 15 (JEP 339) — no external provider. This
-replaced ML-DSA-65 (post-quantum, via Bouncy Castle) when the project pivoted from a
-post-quantum security posture toward core banking breadth; keys and signatures shrank
-from kilobytes to tens of bytes, and the `columnDefinition = "TEXT"` override the old
-scheme needed became unnecessary on a fresh schema. The earlier PQC research is
-preserved (not deleted) for if that priority returns.
+**ML-DSA-65** (FIPS 204), native to the JDK since Java 24 (JEP 497) — no external
+provider, served by the built-in SUN provider. This replaced Ed25519, and the reason is
+the only one that matters: Ed25519 is elliptic-curve, and an elliptic-curve public key
+*is* the hard problem Shor's algorithm solves. Recovering the private key from the
+public one would let an attacker forge any signature this system accepts, retroactively
+and undetectably. Lattice-based ML-DSA carries no such exposure.
+
+The cost is size. Base64-encoded, a public key goes from 60 characters to 2,632 and a
+signature from 88 to 4,412 — so every column holding either is TEXT, restored by
+`V8__mldsa_key_and_signature_widths.sql` and the `columnDefinition = "text"` overrides
+on the entities. The private key is the exception: the JDK encodes it as a 32-byte seed,
+making it *smaller* than Ed25519's was. ML-DSA-65 is NIST level 3, the balanced
+parameter set; -44 and -87 sit either side, and the sets are not interchangeable.
 
 ### 7.2 What gets signed, and how the envelope has evolved
 
 Every signed thing in this system follows the same shape: build a canonical
-pipe-delimited string (an "envelope"), sign it with an Ed25519 private key, persist the
+pipe-delimited string (an "envelope"), sign it with an ML-DSA-65 private key, persist the
 signature alongside the exact values the envelope was built from (so it can be rebuilt
 identically later, never recomputed from possibly-changed data).
 
@@ -503,7 +510,7 @@ ever written to disk.
 - **GCM authenticates the ciphertext.** Tampering with a stored file fails decryption
   outright (`Failed to decrypt stored file — it may have been altered`) rather than
   producing corrupted-but-readable plaintext. This is a distinct guarantee from the
-  Ed25519 signature: GCM proves the stored bytes weren't altered *underneath* the
+  ML-DSA-65 signature: GCM proves the stored bytes weren't altered *underneath* the
   signature; the signature proves who produced the plaintext in the first place.
 - **Backward compatible by construction.** A 6-byte magic header (`MLDSA1`) identifies
   a file this service wrote; anything without it is passed through unchanged, so files
@@ -511,7 +518,7 @@ ever written to disk.
 
 ### 7.4 The stated limitation: no true non-repudiation
 
-Both halves of every account's Ed25519 key pair are generated at registration and
+Both halves of every account's ML-DSA-65 key pair are generated at registration and
 stored server-side (`User.publicKey`, `User.privateKey`). Signing proves a file wasn't
 altered *after this server processed it* — it does not prove non-repudiation between
 two mutually distrusting parties, because this server itself holds every key needed to
@@ -622,7 +629,7 @@ pattern applied to every other signed document in the system).
 
 ### 9.1 Key custody
 
-The Ed25519 signing keys, the AES-256-GCM master key, and the JWT secret are all held
+The ML-DSA-65 signing keys, the AES-256-GCM master key, and the JWT secret are all held
 by the running application, sourced from configuration. This defends against a stolen
 disk, a database dump, or a copied backup — it does not defend against compromise of
 the running server itself, which would expose all three. Moving custody to a KMS or

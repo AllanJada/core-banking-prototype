@@ -166,7 +166,7 @@ public class UserService {
         user.setPassword(passwordEncoder.encode(password));
         user.setRole(role);
 
-        // Every account gets its own Ed25519 key pair at registration, regardless of
+        // Every account gets its own ML-DSA-65 key pair at registration, regardless of
         // role. The private key is used later to sign what this account produces; the
         // public key is handed to recipients (implicitly, via lookup) to verify those
         // signatures.

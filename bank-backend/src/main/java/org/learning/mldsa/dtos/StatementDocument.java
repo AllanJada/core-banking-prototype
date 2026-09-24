@@ -41,7 +41,7 @@ public class StatementDocument {
      */
     private final String generatedAtIso;
 
-    /** Ed25519 signature over the statement's figures, made with the issuing institution's key. */
+    /** ML-DSA-65 signature over the statement's figures, made with the issuing institution's key. */
     private final String signature;
 
     private final List<StatementLine> lines;

@@ -131,7 +131,7 @@ BANK ──POST /api/v1/admin/institutions──▶ INSTITUTION + its settlement
 
 1. The code is normalised and validated (3–8 letters or digits, unique).
 2. A three-digit **bank number** (100–999, unique) is allocated.
-3. The login is created with its own Ed25519 key pair.
+3. The login is created with its own ML-DSA-65 key pair.
 4. `AccountService.openSettlementAccount` opens the institution's settlement account.
 
 *Why:* steps 3 and 4 share one transaction because an institution without a settlement account

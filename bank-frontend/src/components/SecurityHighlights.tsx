@@ -14,7 +14,7 @@ interface Highlight {
 // compliance claims it hasn't earned yet.
 const HIGHLIGHTS: Highlight[] = [
   { icon: AccountBalanceOutlinedIcon, text: "Balances derived from an immutable, double-entry ledger" },
-  { icon: VerifiedUserOutlinedIcon, text: "Every document and payment signed with Ed25519" },
+  { icon: VerifiedUserOutlinedIcon, text: "Every document and payment signed with ML-DSA-65 (post-quantum)" },
   { icon: LockOutlinedIcon, text: "Files encrypted at rest with AES-256-GCM" },
   { icon: RateReviewOutlinedIcon, text: "Incoming transfers reviewed and approved before pickup" },
 ];

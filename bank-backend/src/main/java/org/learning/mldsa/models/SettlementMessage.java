@@ -79,8 +79,8 @@ public class SettlementMessage {
     @Column(name = "xml_hash", nullable = false, updatable = false)
     private String xmlHash;
 
-    /** Ed25519 signature by the debtor agent over the envelope covering the fields above. */
-    @Column(name = "signature", nullable = false, updatable = false)
+    /** ML-DSA-65 signature by the debtor agent over the envelope covering the fields above. */
+    @Column(name = "signature", nullable = false, updatable = false, columnDefinition = "text")
     private String signature;
 
     @Column(name = "created_at", nullable = false, updatable = false)

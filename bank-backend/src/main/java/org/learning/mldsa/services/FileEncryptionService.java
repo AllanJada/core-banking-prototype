@@ -24,7 +24,7 @@ import java.util.Base64;
  *
  * GCM is authenticated encryption: it detects modification of the ciphertext rather than
  * decrypting it into plausible-looking rubbish. That is a separate guarantee from the
- * Ed25519 signature over the plaintext, and both are kept — the signature proves who
+ * ML-DSA-65 signature over the plaintext, and both are kept — the signature proves who
  * produced the document, GCM proves the stored bytes were not altered underneath it.
  *
  * <p><b>What this does and does not protect against.</b> The master key comes from

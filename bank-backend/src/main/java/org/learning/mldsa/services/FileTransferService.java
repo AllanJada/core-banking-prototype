@@ -291,7 +291,7 @@ public class FileTransferService {
      *
      * Requires the transfer to have been approved first — see requirePickupAllowed. Before
      * serving the file, independently recomputes its hash from the bytes actually on disk
-     * right now and re-verifies the Ed25519 signature against the sender's stored public
+     * right now and re-verifies the ML-DSA-65 signature against the sender's stored public
      * key. This confirms both that the file hasn't been altered since it was signed, and
      * that the signature really was produced by the claimed sender's key — not merely that
      * the database's own stored fields agree with each other.
