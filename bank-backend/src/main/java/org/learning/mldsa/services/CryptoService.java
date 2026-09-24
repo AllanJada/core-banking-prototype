@@ -20,36 +20,44 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 
 /**
- * Ed25519 key generation, envelope signing, and verification, plus SHA-384 file hashing.
+ * ML-DSA-65 key generation, envelope signing, and verification, plus SHA-384 file hashing.
  *
- * Ed25519 is part of the JDK itself (JEP 339, Java 15+), so unlike the ML-DSA-65 scheme
- * this replaced, there is no security provider to register and no third-party dependency
- * to keep on the classpath — Bouncy Castle was removed along with that swap.
+ * ML-DSA (FIPS 204, the standardised form of CRYSTALS-Dilithium) is a lattice-based
+ * signature scheme, chosen here because it is not broken by Shor's algorithm. That is the
+ * whole point of the move: Ed25519, which this replaced, is elliptic-curve, and an
+ * elliptic-curve public key *is* the hard problem a quantum computer solves — recovering
+ * the private key from the public one, and with it the ability to forge any signature the
+ * system would accept. Every signature here is meant to still mean something in a decade.
  *
- * The practical difference is size. ML-DSA-65 keys and signatures ran to kilobytes once
- * Base64-encoded; Ed25519's are 32-64 raw bytes, which is why the entity columns holding
- * them no longer need a TEXT override.
+ * No third-party dependency and no provider to register: ML-DSA is in the JDK itself from
+ * Java 24 (JEP 497), served by the built-in SUN provider, the same way Ed25519 was.
  *
- * Note this is a deliberate step away from post-quantum signing: Ed25519 is an
- * elliptic-curve scheme, so it does not carry ML-DSA's resistance to a future
- * quantum attacker. The tradeoff was made knowingly (see the core banking pivot plan) —
- * the earlier post-quantum research remains valid if that priority returns.
+ * The practical cost is size, and it is not small. Base64-encoded, an ML-DSA-65 public key
+ * is 2,632 characters against Ed25519's 60, and a signature is 4,412 against 88 — roughly
+ * fifty times larger. That is why every column holding a key or a signature is TEXT rather
+ * than varchar(255); see V8__mldsa_key_and_signature_widths.sql. The private key is the
+ * exception: the JDK encodes it as a 32-byte seed, so it is *smaller* than Ed25519's was.
  *
- * Keys are NOT interchangeable between the two schemes. An account provisioned under
- * ML-DSA-65 cannot sign or verify here; it needs a freshly generated Ed25519 key pair,
- * and signatures produced under the old scheme cannot be verified at all.
+ * ML-DSA-65 is NIST security level 3 — the balanced parameter set. ML-DSA-44 and -87 exist
+ * either side of it; changing this constant alone would switch schemes, but every existing
+ * key and signature would stop verifying, because parameter sets are not interchangeable.
+ *
+ * Keys are NOT interchangeable between schemes either. An account provisioned under
+ * Ed25519 cannot sign or verify here; it needs a freshly generated ML-DSA-65 key pair, and
+ * signatures produced under the old scheme cannot be verified at all. There is no
+ * dual-scheme path here by design — the database is rebuilt from scratch instead.
  */
 @Service
 public class CryptoService {
 
-    private static final String ALGORITHM = "Ed25519";
+    private static final String ALGORITHM = "ML-DSA-65";
 
     public KeyPair generateSigningKeyPair() {
         try {
             KeyPairGenerator generator = KeyPairGenerator.getInstance(ALGORITHM);
             return generator.generateKeyPair();
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to generate Ed25519 key pair", e);
+            throw new RuntimeException("Failed to generate " + ALGORITHM + " key pair", e);
         }
     }
 
@@ -67,7 +75,7 @@ public class CryptoService {
             KeyFactory factory = KeyFactory.getInstance(ALGORITHM);
             return factory.generatePublic(new X509EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to decode Ed25519 public key", e);
+            throw new RuntimeException("Failed to decode " + ALGORITHM + " public key", e);
         }
     }
 
@@ -77,7 +85,7 @@ public class CryptoService {
             KeyFactory factory = KeyFactory.getInstance(ALGORITHM);
             return factory.generatePrivate(new PKCS8EncodedKeySpec(bytes));
         } catch (GeneralSecurityException e) {
-            throw new RuntimeException("Failed to decode Ed25519 private key", e);
+            throw new RuntimeException("Failed to decode " + ALGORITHM + " private key", e);
         }
     }
 
@@ -102,7 +110,7 @@ public class CryptoService {
      * persisted values, never recomputed fresh) to verify at download time — changing
      * the field order or separator here invalidates every previously-issued signature.
      *
-     * Unaffected by the move to Ed25519: what gets signed is independent of which
+     * Unaffected by the move to ML-DSA: what gets signed is independent of which
      * algorithm signs it.
      */
     public String buildEnvelope(Long senderId, Long receiverId, String fileHash,

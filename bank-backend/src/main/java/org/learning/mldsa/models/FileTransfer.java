@@ -93,9 +93,9 @@ public class FileTransfer {
     @Column(name = "xml_hash")
     private String xmlHash;
 
-    // Ed25519 signatures are a fixed 64 bytes — 88 characters Base64-encoded, so the TEXT
-    // override needed for ML-DSA-65's ~4.4KB signatures no longer applies.
-    @Column(name = "signature")
+    // ML-DSA-65 signatures are a fixed 3,309 bytes — 4,412 characters Base64-encoded, well
+    // past varchar(255), hence the TEXT override.
+    @Column(name = "signature", columnDefinition = "text")
     private String signature;
 
     // Result of the most recent verification. True at creation time (just signed by us);

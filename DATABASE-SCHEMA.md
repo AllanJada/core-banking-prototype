@@ -56,7 +56,7 @@ Every login in the system, of all three roles.
 | `user_id` | `bigint` identity | PK |
 | `user_name` | `varchar(255)` not null | Unique — the login name |
 | `password` | `varchar(255)` | bcrypt hash |
-| `public_key` / `private_key` | `varchar(255)` | Ed25519, Base64. Both halves held server-side — the stated non-repudiation limit |
+| `public_key` / `private_key` | `text` | ML-DSA-65, Base64 — 2,632 and 72 characters. TEXT since V8; a public key alone is ten times over varchar(255). Both halves held server-side — the stated non-repudiation limit |
 | `role` | `varchar(255)` not null | `NORMAL_USER` \| `INSTITUTION` \| `BANK` |
 | `bic` | `varchar(11)` | ISO 9362, null for every institution here |
 | `institution_code` | `varchar(8)` | Unique. `INSTITUTION` rows only — the letter code people read, e.g. `ALPHA` |
@@ -109,7 +109,7 @@ meaning by having a negative amount misread.
 | `amount` | `numeric(19,2)` not null | |
 | `description` | `varchar(255)` | |
 | `transaction_ref` | `varchar(36)` not null | Joins to **both** postings: the customer's credit and the till's debit |
-| `signature` | `varchar(255)` not null | Ed25519 over account, institution code, amount, timestamp — signed by the institution |
+| `signature` | `text` not null | ML-DSA-65 (4,412 chars) over account, institution code, amount, timestamp — signed by the institution |
 | `deposited_at` | `timestamptz` not null | |
 
 ### `payments.payments`
@@ -166,7 +166,7 @@ One ISO 20022 `pacs.008` per inter-bank payment. None for a payment inside one b
 | `currency` | `varchar(3)` not null | |
 | `stored_filename` | `varchar(255)` not null | Unique. The encrypted XML on disk |
 | `xml_hash` | `varchar(255)` not null | SHA-384 of the canonicalised XML |
-| `signature` | `varchar(255)` not null | Ed25519 by the sending bank |
+| `signature` | `text` not null | ML-DSA-65 (4,412 chars) by the sending bank |
 | `created_at` | `timestamptz` not null | |
 
 *Why the agent codes are duplicated here* even though they can be joined from `users`: the

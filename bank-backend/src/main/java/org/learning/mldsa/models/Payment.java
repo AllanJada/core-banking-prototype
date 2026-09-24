@@ -64,9 +64,10 @@ public class Payment {
     @Column(name = "transaction_ref", length = 36)
     private String transactionRef;
 
-    // Ed25519 signature over fromAccount|toAccount|amount|timestamp, made with the paying
+    // ML-DSA-65 signature over fromAccount|toAccount|amount|timestamp, made with the paying
     // customer's own key. Null on a failed attempt: nothing is signed that did not happen.
-    @Column(name = "signature")
+    // TEXT because these run to 4,412 characters Base64-encoded.
+    @Column(name = "signature", columnDefinition = "text")
     private String signature;
 
     @Column(name = "created_at", nullable = false, updatable = false)

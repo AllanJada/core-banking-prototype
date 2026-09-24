@@ -53,14 +53,14 @@ public class Deposit {
     private String transactionRef;
 
     /**
-     * Ed25519 signature made with the <em>institution's</em> key, over
+     * ML-DSA-65 signature made with the <em>institution's</em> key, over
      * accountNumber|institutionCode|amount|timestamp.
      *
      * The institution signs because the institution is the one making the claim: that it
      * received this money and credited this account. A deposit signed by the customer — as
      * these once were — had the beneficiary attesting to a payment they had not made.
      */
-    @Column(name = "signature", nullable = false, updatable = false)
+    @Column(name = "signature", nullable = false, updatable = false, columnDefinition = "text")
     private String signature;
 
     @Column(name = "deposited_at", nullable = false, updatable = false)
